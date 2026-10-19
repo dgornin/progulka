@@ -1,0 +1,33 @@
+# Server deployment: the app is reachable only through Caddy (HTTPS, port 443).
+# Usage on the server: docker compose -f docker-compose.prod.yml up -d --build
+services:
+  progulka:
+    build: .
+    env_file:
+      - .env
+    # Behind Caddy: take the visitor's address from X-Forwarded-For for the rate limit.
+    # Only Caddy can reach this port (it is not published), so trusting it is safe.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    volumes:
+      - ./.cache:/srv/cache
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-185-156-108-126.sslip.io}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - progulka
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

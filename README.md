@@ -151,6 +151,26 @@ docker compose up --build
 | `TODAY` | зафиксировать «сегодня» (`YYYY-MM-DD`): дата входит в промпт, так что прогон, отрепетированный накануне, воспроизводится из кэша только с той же датой |
 | `CACHE_DIR` | где лежат кэши HTTP и LLM (по умолчанию `.cache` в репозитории; в Docker он же смонтирован в `/srv/cache`) |
 
+## Деплой на сервер
+
+На сервере нужны Docker и открытые порты 80 и 443.
+
+```bash
+git clone https://github.com/dgornin/progulka && cd progulka
+cp .env.example .env    # ключ API, и обязательно лимиты: RATE_LIMIT_PER_HOUR, DAILY_BUDGET_USD, MAX_CONCURRENT_RUNS
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+`docker-compose.prod.yml` публикует наружу только [Caddy](https://caddyserver.com) (`deploy/Caddyfile`):
+он сам получает HTTPS-сертификат для `SITE_ADDRESS` и проксирует запросы в приложение,
+не буферизуя поток событий агента. По умолчанию адрес — `185-156-108-126.sslip.io`
+(sslip.io превращает IP в имя, для которого можно выпустить сертификат); свой домен —
+A-запись на IP сервера и `SITE_ADDRESS` в `.env`.
+
+Ссылку может открыть кто угодно, а каждый маршрут тратит ключ API, поэтому на сервере
+включены лимиты (`app/limits.py`): запусков в час с одного адреса, трат на LLM в сутки
+и одновременных прогонов. Отказ приходит до запуска агента и ничего не стоит.
+
 ## Локальный запуск и тесты
 
 ```bash
@@ -196,6 +216,7 @@ Docker-образ с проверкой `/api/health`.
 ```
 app/
   main.py          HTTP: UI, потоковая выдача событий, сессии правок
+  limits.py        лимиты публичного деплоя: запуски в час, бюджет в сутки, параллельность
   pipeline.py      фиксированный пайплайн и раунд исправления
   config.py        настройки из окружения
   models.py        доменные модели: TripBrief, Place, Candidate, Plan, ...
@@ -224,6 +245,7 @@ app/
 tests/             офлайн-тесты с записанными ответами API
 eval/              сравнение с baseline и между моделями
 docs/proposal.pdf  презентация proposal
+deploy/Caddyfile   HTTPS-прокси для деплоя (docker-compose.prod.yml)
 ```
 
 ## Ограничения и план к финальной защите

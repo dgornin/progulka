@@ -16,6 +16,10 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 def _env(name: str, default: str) -> str:
     value = os.environ.get(name, "").strip()
+    # python-dotenv and docker compose strip quotes, `docker run --env-file` does not:
+    # API_KEY='sk-...' would reach the provider with the quotes.
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1].strip()
     return value or default
 
 
@@ -34,6 +38,10 @@ class Settings:
     # Pins "today": the brief prompt and the dates it resolves depend on it, so without
     # the pin a run rehearsed yesterday does not replay from the cache.
     today: date | None
+    # Public deployment guards (app/limits.py); 0 = off.
+    rate_limit_per_hour: int
+    daily_budget_usd: float
+    max_concurrent_runs: int
 
 
 def load_settings() -> Settings:
@@ -58,6 +66,9 @@ def load_settings() -> Settings:
         ),
         llm_replay=_env("LLM_REPLAY", "0") == "1",
         today=date.fromisoformat(pinned) if (pinned := _env("TODAY", "")) else None,
+        rate_limit_per_hour=int(_env("RATE_LIMIT_PER_HOUR", "0")),
+        daily_budget_usd=float(_env("DAILY_BUDGET_USD", "0")),
+        max_concurrent_runs=int(_env("MAX_CONCURRENT_RUNS", "0")),
     )
 
 

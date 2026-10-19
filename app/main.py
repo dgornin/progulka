@@ -17,12 +17,13 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agent.tools import tool_schemas
 from app.config import settings
+from app.limits import Limits
 from app.llm import LLM, LLMError
 from app.models import AgentEvent, Emit
 from app.pipeline import (
@@ -40,6 +41,9 @@ log = logging.getLogger("progulka")
 STATIC = Path(__file__).parent / "static"
 
 base_llm = LLM.from_settings(settings)
+limits = Limits(
+    settings.rate_limit_per_hour, settings.daily_budget_usd, settings.max_concurrent_runs
+)
 
 app = FastAPI(
     title="Прогулка",
@@ -68,15 +72,15 @@ async def tools() -> list[dict[str, Any]]:
 
 
 @app.post("/api/plan")
-async def plan(req: PlanRequest) -> StreamingResponse:
+async def plan(req: PlanRequest, request: Request) -> StreamingResponse:
     async def job(llm: LLM, emit: Emit) -> tuple[Session, str | None]:
         return await plan_trip(req, llm, emit, today=settings.today or date.today()), None
 
-    return _stream(job)
+    return _stream(job, _client(request))
 
 
 @app.post("/api/sessions/{session_id}/feedback")
-async def feedback(session_id: str, req: FeedbackRequest) -> StreamingResponse:
+async def feedback(session_id: str, req: FeedbackRequest, request: Request) -> StreamingResponse:
     session = get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Сессия не найдена: постройте маршрут заново")
@@ -84,10 +88,18 @@ async def feedback(session_id: str, req: FeedbackRequest) -> StreamingResponse:
     async def job(llm: LLM, emit: Emit) -> tuple[Session, str | None]:
         return await apply_feedback(session, req, llm, emit)
 
-    return _stream(job)
+    return _stream(job, _client(request))
 
 
-def _stream(job: Job) -> StreamingResponse:
+def _client(request: Request) -> str:
+    # Behind the reverse proxy uvicorn runs with --proxy-headers, so this is the visitor.
+    return request.client.host if request.client else "unknown"
+
+
+def _stream(job: Job, client: str) -> StreamingResponse:
+    refusal = limits.admit(client)
+    if refusal:
+        raise HTTPException(status_code=429, detail=refusal)
     queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
 
     async def emit(event: AgentEvent) -> None:
@@ -114,14 +126,18 @@ def _stream(job: Job) -> StreamingResponse:
             log.exception("pipeline failed")
             await emit(AgentEvent(type="error", data={"message": "Внутренняя ошибка, см. логи"}))
         finally:
+            limits.release(llm.usage.cost_usd)
             elapsed = round(time.monotonic() - started, 1)
             await emit(
                 AgentEvent(type="done", data={"usage": llm.usage.as_dict(), "elapsed_s": elapsed})
             )
             await queue.put(None)
 
+    # Started here, not in lines(): the run releases its limit slot in its finally, so
+    # it must run even if the client leaves before the first byte is streamed.
+    task = asyncio.create_task(run())
+
     async def lines() -> AsyncIterator[str]:
-        task = asyncio.create_task(run())
         try:
             while (event := await queue.get()) is not None:
                 yield event.model_dump_json() + "\n"
