@@ -1,6 +1,6 @@
-Model: `openai/gpt-6-luna`, queries anchored at 2026-10-20.
+Model: `openai/gpt-6-luna`, queries anchored at 2026-10-20. Agent stops are source records with coordinates, so they are located by construction; for the baseline, located means found in OpenStreetMap.
 
-| query | system | stops | found in OSM | closed at visit | impossible legs | over window | walk km | LLM calls | cost $ | s |
+| query | system | stops | real places (located) | closed at visit | impossible legs | over window | walk km | LLM calls | cost $ | s |
 |---|---|---|---|---|---|---|---|---|---|---|
 | spb-constructivism | agent | 10 | 10/10 | 0 | 0 | no | 9.8 | 16 | 0.0035 | 66.0 |
 | spb-constructivism | baseline | 9 | 9/9 | 0 | 5 | no | 21.6 | 1 | 0.0002 | 22.9 |

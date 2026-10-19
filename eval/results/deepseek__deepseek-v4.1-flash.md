@@ -1,6 +1,6 @@
-Model: `deepseek/deepseek-v4.1-flash`, queries anchored at 2026-10-20.
+Model: `deepseek/deepseek-v4.1-flash`, queries anchored at 2026-10-20. Agent stops are source records with coordinates, so they are located by construction; for the baseline, located means found in OpenStreetMap.
 
-| query | system | stops | found in OSM | closed at visit | impossible legs | over window | walk km | LLM calls | cost $ | s |
+| query | system | stops | real places (located) | closed at visit | impossible legs | over window | walk km | LLM calls | cost $ | s |
 |---|---|---|---|---|---|---|---|---|---|---|
 | spb-constructivism | agent | 15 | 15/15 | 0 | 0 | no | 9.0 | 13 | 0.0099 | 65.6 |
 | spb-constructivism | baseline | 11 | 11/11 | 0 | 7 | no | 72.7 | 1 | 0.0005 | 30.3 |

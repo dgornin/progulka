@@ -1,6 +1,6 @@
-Model: `anthropic/claude-haiku-5.5`, queries anchored at 2026-10-20.
+Model: `anthropic/claude-haiku-5.5`, queries anchored at 2026-10-20. Agent stops are source records with coordinates, so they are located by construction; for the baseline, located means found in OpenStreetMap.
 
-| query | system | stops | found in OSM | closed at visit | impossible legs | over window | walk km | LLM calls | cost $ | s |
+| query | system | stops | real places (located) | closed at visit | impossible legs | over window | walk km | LLM calls | cost $ | s |
 |---|---|---|---|---|---|---|---|---|---|---|
 | spb-constructivism | agent | 11 | 11/11 | 0 | 0 | no | 9.3 | 10 | 0.0144 | 58.1 |
 | spb-constructivism | baseline | 11 | 5/11 | 1 | 2 | no | 17.5 | 1 | 0.0005 | 35.0 |
