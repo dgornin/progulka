@@ -67,6 +67,7 @@ const VIOLATIONS = {
   long_walk: "Долгий переход",
   uncovered_interest: "Интерес не покрыт",
   too_few_stops: "Мало остановок",
+  missing_must_include: "Нет в маршруте",
 };
 
 const PACE = { relaxed: "неспешно", active: "активный темп" };
@@ -85,6 +86,7 @@ const ui = {
   composer: $("#composer"),
   request: $("#request"),
   build: $("#build"),
+  stop: $("#stop"),
   steps: $("#steps"),
   status: $("#status"),
   hint: $("#trace-hint"),
@@ -191,11 +193,12 @@ function errorDetail(text) {
 }
 
 /** POST a JSON body and call onEvent for every NDJSON line as soon as it arrives. */
-async function streamEvents(url, body, onEvent) {
+async function streamEvents(url, body, onEvent, signal) {
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
     body: JSON.stringify(body),
+    signal,
   });
   if (!response.ok || !response.body) {
     throw new Error(`Сервер ответил ${response.status}: ${errorDetail(await response.text())}`);
@@ -219,10 +222,14 @@ async function run(url, body, kind, title) {
   setBusy(true);
   beginRun(kind, title);
   try {
-    await streamEvents(url, body, dispatch);
+    await streamEvents(url, body, dispatch, state.run.controller.signal);
   } catch (error) {
-    // fetch and the stream reader throw TypeError when the connection itself fails
-    onError({ message: error instanceof TypeError ? `Нет связи с сервером: ${error.message}` : error.message });
+    if (error.name === "AbortError") {
+      onError({ message: "Остановлено: агент прерван" }); // the stop button
+    } else {
+      // fetch and the stream reader throw TypeError when the connection itself fails
+      onError({ message: error instanceof TypeError ? `Нет связи с сервером: ${error.message}` : error.message });
+    }
   } finally {
     endRun();
     setBusy(false);
@@ -247,13 +254,17 @@ function dispatch(event) {
 function setBusy(busy) {
   state.busy = busy;
   document.body.classList.toggle("is-busy", busy);
-  for (const button of document.querySelectorAll("button")) button.disabled = busy;
+  for (const button of document.querySelectorAll("button")) button.disabled = busy && button !== ui.stop;
+  ui.stop.hidden = !busy;
   ui.build.textContent = busy ? "Агент работает…" : "Построить маршрут";
 }
 
 function beginRun(kind, title) {
   state.run = {
     kind,
+    // the stop button aborts the request; the server then cancels the run and, for a
+    // feedback run, restores the session, so the route on screen stays the current one
+    controller: new AbortController(),
     stages: new Map(), // name -> "active" | "done" | "failed"
     stageRows: new Map(), // name -> {row, startedAt}
     toolRows: new Map(), // tool call id -> row
@@ -285,11 +296,12 @@ function beginRun(kind, title) {
 function endRun() {
   const current = state.run;
   current.over = true;
+  // no answer is coming, even with a plan: the research time budget can cut off a tool call
+  for (const row of current.toolRows.values()) row.classList.remove("is-pending");
   if (current.gotPlan) {
     setStatus(current.elapsed ? `Маршрут готов за ${current.elapsed}` : "Маршрут готов");
   } else {
     for (const [name, status] of current.stages) if (status === "active") current.stages.set(name, "failed");
-    for (const row of current.toolRows.values()) row.classList.remove("is-pending"); // no answer is coming
     if (!current.failed) {
       const text = "Агент закончил работу, но маршрута не прислал. Попробуйте ещё раз или уточните запрос.";
       addRow("error", badge("×"), text);
@@ -589,8 +601,9 @@ function clearCandidates() {
 /** As soon as the city is geocoded: fly there and mark the start. */
 function showStart({ lat, lon, label }) {
   startMarker?.remove();
+  // Leaflet puts a string tooltip in as HTML, so outside text goes in as a DOM node
   startMarker = L.marker([lat, lon], { icon: pinIcon("start", "", 0), title: label ?? "Старт" })
-    .bindTooltip(label ?? "Старт", { direction: "top", offset: [0, -14] })
+    .bindTooltip(h("span", {}, label ?? "Старт"), { direction: "top", offset: [0, -14] })
     .addTo(candidateLayer);
   map.flyTo([lat, lon], 15, { animate: !reduceMotion, duration: 1.2 });
 }
@@ -599,7 +612,7 @@ function showCandidate(id, name, kind, lat, lon) {
   hideCandidate(id);
   const icon = L.divIcon({ className: "pin pin-cand", html: "<span></span>", iconSize: [16, 16], iconAnchor: [8, 8] });
   const marker = L.marker([lat, lon], { icon, title: name, keyboard: false })
-    .bindTooltip(`${name} · ${kindLabel(kind)}`, { direction: "top", offset: [0, -8] })
+    .bindTooltip(h("span", {}, `${name} · ${kindLabel(kind)}`), { direction: "top", offset: [0, -8] })
     .addTo(candidateLayer);
   state.candidates.set(id, marker);
   // Batch the re-framing: a turn can shortlist ten places at once.
@@ -630,7 +643,7 @@ function settleCandidates(plan) {
       hideCandidate(id);
     } else {
       marker.getElement()?.classList.add("is-dropped");
-      marker.setTooltipContent(`${state.placeNames.get(id) ?? "Место"} — не вошло в маршрут`);
+      marker.setTooltipContent(h("span", {}, `${state.placeNames.get(id) ?? "Место"} — не вошло в маршрут`));
     }
   }
 }
@@ -815,14 +828,16 @@ function renderPlan(plan, usage) {
 
 /* ---------- controls ---------- */
 
-async function sendFeedback(feedback, excludeIds = []) {
+async function sendFeedback(feedback, excludeIds = [], title = feedback) {
   if (!state.sessionId || state.busy) return false;
   const url = `/api/sessions/${encodeURIComponent(state.sessionId)}/feedback`;
-  return run(url, { feedback, exclude_place_ids: excludeIds }, "feedback", feedback);
+  return run(url, { feedback, exclude_place_ids: excludeIds }, "feedback", title);
 }
 
+// The button sends only the id, no words: the server removes the stop without asking
+// the LLM what was meant, and a place name is never passed off as the traveller's text.
 function removeStop(place) {
-  sendFeedback(`Убери ${place.name}`, [place.id]);
+  sendFeedback("", [place.id], `Убрать: ${place.name}`);
 }
 
 const submitOnCmdEnter = (form) => (e) => {
@@ -838,6 +853,7 @@ ui.composer.addEventListener("submit", (e) => {
   if (body.request) run("/api/plan", body, "plan", body.request);
 });
 ui.request.addEventListener("keydown", submitOnCmdEnter(ui.composer));
+ui.stop.addEventListener("click", () => state.run?.controller.abort());
 
 for (const example of document.querySelectorAll("[data-example]")) {
   example.addEventListener("click", () => {

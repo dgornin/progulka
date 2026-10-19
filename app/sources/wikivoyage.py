@@ -18,11 +18,12 @@ in opening_hours, which must be machine-readable OSM syntax.
 """
 
 import html
+import math
 import re
 from urllib.parse import quote
 
 from app.models import Place
-from app.sources.http import http
+from app.sources.wikipedia import query_mediawiki
 
 SECTION_KIND = {"see": "sight", "do": "activity", "eat": "food", "drink": "bar", "buy": "shop"}
 MIN_LISTINGS = 30  # fewer on the city page: an overview, the places live on district pages
@@ -62,7 +63,7 @@ async def listings(city: str, lang: str = "ru", sections: list[str] | None = Non
 
 async def _wikitexts(lang: str, titles: list[str]) -> dict[str, str]:
     """Current wikitext of several pages in one request, keyed by resolved title."""
-    payload = await http.get_json(
+    payload = await query_mediawiki(
         f"https://{lang}.wikivoyage.org/w/api.php",
         {
             "action": "query",
@@ -105,7 +106,9 @@ def _parse_listings(text: str, page: str, lang: str, wanted: set[str]) -> list[P
             lat, lon = float(params["lat"]), float(params["long"])
         except (KeyError, ValueError):
             continue
-        if section not in wanted or not name:
+        # float() also reads "nan" and "inf": one such listing would break the distance
+        # sort, and with it the whole tool call for the city.
+        if section not in wanted or not name or not (math.isfinite(lat) and math.isfinite(lon)):
             continue
         content = _clean(params.get("content") or params.get("description") or "")
         hours = _clean(params.get("hours", ""))
@@ -166,9 +169,10 @@ def _params(body: str) -> dict[str, str]:
 
 def _clean(value: str) -> str:
     value = _EXTERNAL_LINK.sub(r"\1", value)
-    value = _HTML_TAG.sub(" ", value)
+    # Unescape first, so that an escaped tag ("&lt;img ...&gt;") is stripped as well.
+    value = _HTML_TAG.sub(" ", html.unescape(value))
     value = _EMPHASIS.sub("", value)
-    return " ".join(html.unescape(value).split())
+    return " ".join(value.split())
 
 
 def _dedupe_by_name(places: list[Place]) -> list[Place]:

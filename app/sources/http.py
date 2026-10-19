@@ -1,7 +1,9 @@
 """Shared HTTP client for the open data sources.
 
 - one User-Agent that identifies the app (Nominatim and Wikimedia require it);
-- per-host minimum interval between requests (Nominatim allows 1 request/second);
+- for the rate-limited hosts (Nominatim allows 1 request/second, Overpass a few
+  at a time per IP) one request at a time with a minimum interval; other hosts
+  (Wikipedia, Wikivoyage) get the agent's parallel tool calls in parallel;
 - on-disk cache keyed by method + URL + params + body, so the same city is not
   fetched twice and a rehearsed demo does not depend on the network;
 - retries with backoff on 429/5xx and timeouts; callers with mirrors (Overpass)
@@ -9,6 +11,7 @@
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import time
@@ -21,13 +24,11 @@ import httpx
 
 from app.config import settings
 
-# Seconds between two requests to the same host.
+# Seconds between two requests to the same rate-limited host.
 MIN_INTERVAL = {
     "nominatim.openstreetmap.org": 1.1,
-    "overpass-api.de": 1.0,
-    "overpass.openstreetmap.fr": 1.0,
-    "overpass.private.coffee": 1.0,
     "routing.openstreetmap.de": 0.5,
+    **{urlparse(url).netloc: 1.0 for url in settings.overpass_urls},
 }
 CACHE_TTL_S = 7 * 24 * 3600
 RETRY_STATUSES = {429, 500, 502, 503, 504}
@@ -48,8 +49,14 @@ class HttpClient:
         self._locks: dict[str, asyncio.Lock] = {}
         self._last: dict[str, float] = {}
 
-    async def get_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
-        return await self._request("GET", url, params=params)
+    async def get_json(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        *,
+        cacheable: Callable[[Any], bool] | None = None,
+    ) -> Any:
+        return await self._request("GET", url, params=params, cacheable=cacheable)
 
     async def post_form_json(
         self,
@@ -91,10 +98,14 @@ class HttpClient:
         timeout = httpx.Timeout(timeout_s, connect=min(timeout_s, 10.0)) if timeout_s else None
 
         host = urlparse(url).netloc
-        lock = self._locks.setdefault(host, asyncio.Lock())
+        gate = (
+            self._locks.setdefault(host, asyncio.Lock())
+            if host in MIN_INTERVAL
+            else contextlib.nullcontext()
+        )
         delay = 2.0
         for attempt in range(1, attempts + 1):
-            async with lock:
+            async with gate:
                 wait = MIN_INTERVAL.get(host, 0) - (time.monotonic() - self._last.get(host, 0))
                 if wait > 0:
                     await asyncio.sleep(wait)

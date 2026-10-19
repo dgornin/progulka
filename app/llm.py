@@ -2,7 +2,10 @@
 
 Three jobs, all of them things a framework would hide from you:
 - `chat`: one call with optional tools; retries on rate limits and on OpenRouter's
-  "200 with an error body" quirk; counts tokens, calls and cost for the run.
+  "200 with an error body" quirk; counts tokens, calls and cost for the run. The
+  SDK's own retries are off: retries inside retries multiplied the wait on a hung
+  provider, so this is the only layer and one call waits at most MAX_ATTEMPTS
+  request timeouts plus the backoff.
 - `structured`: ask for JSON matching a pydantic model, validate it, and on a
   validation error send the errors back and ask again (bounded retries).
 - a replay cache: every response is stored on disk under a hash of the request,
@@ -13,6 +16,7 @@ Three jobs, all of them things a framework would hide from you:
 import asyncio
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,8 +27,11 @@ from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
 
+log = logging.getLogger(__name__)
+
 T = TypeVar("T", bound=BaseModel)
 
+REQUEST_TIMEOUT_S = 60
 RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 4
 
@@ -48,7 +55,6 @@ class ToolCall:
 class ChatTurn:
     content: str | None
     tool_calls: list[ToolCall]
-    finish_reason: str | None
     # The assistant message exactly as it must be appended to the history, so the
     # next call can answer each tool_call_id with a role="tool" message.
     message: dict[str, Any]
@@ -86,7 +92,12 @@ class LLM:
     def from_settings(cls, settings: Settings) -> "LLM":
         if not settings.api_key or not settings.model_name:
             raise RuntimeError("API_KEY and MODEL_NAME must be set (see .env.example)")
-        client = AsyncOpenAI(base_url=settings.base_url, api_key=settings.api_key, timeout=90)
+        client = AsyncOpenAI(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            timeout=REQUEST_TIMEOUT_S,
+            max_retries=0,  # _call_with_retries is the only retry layer
+        )
         return cls(
             client=client,
             model=settings.model_name,
@@ -111,7 +122,6 @@ class LLM:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | None = None,
         temperature: float | None = None,
         max_tokens: int = 2500,
         response_format: dict[str, Any] | None = None,
@@ -124,7 +134,7 @@ class LLM:
         }
         if tools:
             request["tools"] = tools
-            request["tool_choice"] = tool_choice or "auto"
+            request["tool_choice"] = "auto"
         if response_format:
             request["response_format"] = response_format
         # OpenRouter extensions travel in extra_body: reasoning on/off and cost accounting.
@@ -135,6 +145,10 @@ class LLM:
         if raw is not None:
             self.usage.cached_calls += 1
         else:
+            if self.replay:
+                # A rehearsed run that misses here differs from the rehearsal (another
+                # date, prompt or source answer) and from now on goes to the provider.
+                log.warning("LLM replay miss: calling the provider")
             raw = await self._call_with_retries(request, extra_body)
             self._cache_put(request, raw)
             self._count(raw)
@@ -198,9 +212,10 @@ class LLM:
                 return raw
             except APIStatusError as e:
                 status = e.status_code
+                # The SDK has already unwrapped {"error": {...}} into e.body. e.message holds
+                # the raw response, which carries the account id: never pass it on.
                 body = e.body if isinstance(e.body, dict) else {}
-                # Pass on only the provider's message: the raw body carries the account id.
-                message = (body.get("error") or {}).get("message") or str(e.message)
+                message = body.get("message") or f"HTTP {status}"
                 if status not in RETRY_STATUSES or attempt == MAX_ATTEMPTS:
                     raise LLMError(message, status) from e
             except (APIConnectionError, APITimeoutError) as e:
@@ -255,12 +270,7 @@ def _parse_turn(raw: dict[str, Any]) -> ChatTurn:
             {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
             for c in calls
         ]
-    return ChatTurn(
-        content=msg.get("content"),
-        tool_calls=calls,
-        finish_reason=choice.get("finish_reason"),
-        message=message,
-    )
+    return ChatTurn(content=msg.get("content"), tool_calls=calls, message=message)
 
 
 def _require_all(json_schema: dict[str, Any]) -> dict[str, Any]:

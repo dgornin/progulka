@@ -12,16 +12,18 @@ from datetime import date, datetime, time
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
+from openai import AsyncOpenAI
 
-from app.agent import tools
+from app.agent import tools, writer
 from app.agent.brief import parse_brief
 from app.agent.prompts import BUDGET_WARNING, NUDGE
 from app.agent.replanner import interpret_feedback
 from app.agent.researcher import research
 from app.agent.tools import ResearchState, ToolOutcome, execute, tool_schemas
 from app.agent.writer import write_texts
-from app.llm import ChatTurn, LLMError, ToolCall
+from app.llm import LLM, ChatTurn, LLMError, ToolCall
 from app.models import AgentEvent, GeoPoint, Interest, Place, Plan, Stop, TripBrief
 from app.sources import osm, wikipedia, wikivoyage
 from app.sources.http import SourceError
@@ -142,7 +144,7 @@ def turn(*calls: ToolCall, content: str | None = None) -> ChatTurn:
             }
             for c in calls
         ]
-    return ChatTurn(content=content, tool_calls=list(calls), finish_reason=None, message=message)
+    return ChatTurn(content=content, tool_calls=list(calls), message=message)
 
 
 def shortlist_call(place: Place, interests: list[str] = ()) -> ToolCall:
@@ -392,6 +394,17 @@ async def test_finish_is_accepted_when_shortlist_is_complete() -> None:
     assert outcome.finished and outcome.error is None
 
 
+async def test_finish_is_rejected_while_a_must_include_place_is_missing() -> None:
+    state = make_state(must_include=["Эрмитаж"])
+    await search_all(state)
+    for place in [*OSM_PLACES, SINGER]:
+        await execute(state, "shortlist_place", shortlist_call(place, ["модерн"]).arguments)
+
+    outcome = await run_tool(state, "finish_research", summary="готово")
+
+    assert not outcome.finished and "must_include 'Эрмитаж'" in outcome.error
+
+
 # --- research loop -------------------------------------------------------------------
 
 
@@ -533,9 +546,15 @@ async def test_writer_fills_known_stops_and_ignores_unknown_ids() -> None:
     assert [s.place.id for s in plan.stops] == [MUSEUM.id, SINGER.id]
 
 
-async def test_writer_failure_keeps_the_plan() -> None:
+async def test_writer_failure_or_timeout_keeps_the_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SlowLLM:
+        async def structured(self, messages, schema, **_):
+            await asyncio.sleep(5)
+
+    monkeypatch.setattr(writer, "WRITER_TIMEOUT_S", 0.01)
     plan = make_plan()
     assert await write_texts(FakeLLM(structured=[LLMError("rate limited", 429)]), plan) == plan
+    assert await write_texts(SlowLLM(), plan) == plan
 
 
 async def test_replanner_keeps_only_ids_of_current_stops_and_a_valid_window() -> None:
@@ -550,4 +569,32 @@ async def test_replanner_keeps_only_ids_of_current_stops_and_a_valid_window() ->
     assert "2. id=wikipedia:ru:4321 | Дом Зингера" in llm.seen[0][1]["content"]
     assert result.exclude_place_ids == [SINGER.id]
     assert result.end_time is None  # 09:00 is before the 10:00 start
+    assert result.reply.endswith("Время оставляю прежним: окно 10:00–09:00 получилось пустым.")
     assert result.research_goal == "найти кафе вместо Дома Зингера"
+
+
+async def test_replanner_says_when_it_found_nothing_to_remove() -> None:
+    edit = {"exclude_place_ids": ["osm:node/404"], "reply": "Убираю собор."}
+    result = await interpret_feedback(FakeLLM(structured=[edit]), make_plan(), "убери собор")
+    assert result.exclude_place_ids == []
+    assert result.reply == "Убираю собор. Не нашёл в маршруте остановок, которые нужно убрать."
+
+
+# --- LLM client ----------------------------------------------------------------------
+
+
+async def test_provider_error_passes_on_only_the_providers_message() -> None:
+    # OpenRouter's error body also names the account; the UI must not get it.
+    def provider(request: httpx.Request) -> httpx.Response:
+        body = {"error": {"message": "No auth credentials found", "code": 401}, "user_id": "u_42"}
+        return httpx.Response(401, json=body)
+
+    client = AsyncOpenAI(
+        base_url="https://llm.test/v1",
+        api_key="test",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(provider)),
+    )
+    with pytest.raises(LLMError) as error:
+        await LLM(client=client, model="test").chat([{"role": "user", "content": "hi"}])
+    assert (str(error.value), error.value.status) == ("No auth credentials found", 401)

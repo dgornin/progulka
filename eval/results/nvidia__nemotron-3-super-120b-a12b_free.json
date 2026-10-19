@@ -1,0 +1,131 @@
+[
+  {
+    "id": "spb-constructivism",
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "agent": {
+      "stops": 10,
+      "found": 10,
+      "closed": 0,
+      "impossible_legs": 0,
+      "over_window": false,
+      "walk_km": 7.9,
+      "llm_calls": 12,
+      "cost_usd": 0.0,
+      "seconds": 112.7
+    },
+    "agent_stops": [
+      "Бадаевский хлебозавод",
+      "Карета",
+      "Мурал",
+      "Вкусно — и точка",
+      "Стардогs",
+      "Abbey Road",
+      "Михаил Горшенёв",
+      "Дом-коммуна инженеров и писателей",
+      "Тяговая подстанция № 11",
+      "Пышечная на Большой Конюшенной"
+    ],
+    "baseline": {
+      "stops": 11,
+      "found": 8,
+      "closed": 0,
+      "impossible_legs": 5,
+      "over_window": false,
+      "walk_km": 13.2,
+      "llm_calls": 1,
+      "cost_usd": 0.0,
+      "seconds": 41.9
+    },
+    "baseline_stops": [
+      "Московский вокзал",
+      "Дом книги (бывший Дом Советов)",
+      "Улица Рубинштейна (стрит-арт и граффити)",
+      "Уличная еда: шашлычная у метро 'Площадь Восстания'",
+      "Дом Зингера (Конструктивизм в деталях фасада)",
+      "Жилой дом на улице Ломоносова (пример позднего конструктивизма)",
+      "Уличная еда: чебуречная на улице Ломоносова",
+      "Фасады конструктивизма на улице Большая Морская",
+      "Уличная еда: блины с начинкой у Казанского собора",
+      "Дом текстильщиков (Конструктивизм 1930-х)",
+      "Финал: вид на Неву и конструктивистские мосты"
+    ]
+  },
+  {
+    "id": "kazan-history",
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "agent": {
+      "stops": 2,
+      "found": 2,
+      "closed": 0,
+      "impossible_legs": 0,
+      "over_window": false,
+      "walk_km": 0.1,
+      "llm_calls": 16,
+      "cost_usd": 0.0,
+      "seconds": 43.4
+    },
+    "agent_stops": [
+      "Казанский кремль",
+      "Эрмитаж-Казань"
+    ],
+    "baseline": {
+      "stops": 7,
+      "found": 7,
+      "closed": 0,
+      "impossible_legs": 6,
+      "over_window": false,
+      "walk_km": 30.1,
+      "llm_calls": 1,
+      "cost_usd": 0.0,
+      "seconds": 11.2
+    },
+    "baseline_stops": [
+      "Казанский Кремль",
+      "Мечеть Кул-Шариф",
+      "Благовещенский собор",
+      "Татарская кухня «Туган Авылым»",
+      "Мечеть Марджани",
+      "Церковь Николы Набережного",
+      "Улица Баумана (прогулка и завершение)"
+    ]
+  },
+  {
+    "id": "paris-impressionism",
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "agent": {
+      "stops": 2,
+      "found": 2,
+      "closed": 0,
+      "impossible_legs": 0,
+      "over_window": false,
+      "walk_km": 1.0,
+      "llm_calls": 16,
+      "cost_usd": 0.0,
+      "seconds": 32.2
+    },
+    "agent_stops": [
+      "Musée de l'Orangerie",
+      "Musée d'Orsay"
+    ],
+    "baseline": {
+      "stops": 7,
+      "found": 7,
+      "closed": 2,
+      "impossible_legs": 3,
+      "over_window": false,
+      "walk_km": 10.4,
+      "llm_calls": 1,
+      "cost_usd": 0.0,
+      "seconds": 132.6
+    },
+    "baseline_stops": [
+      "Place de la Concorde",
+      "Musée de l'Orangerie",
+      "Librairie Galignani",
+      "Du Pain et des Idées",
+      "Shakespeare and Company",
+      "Librairie Antiquaire Weil",
+      "Café de Flore (terrasse calme)"
+    ]
+  }
+]

@@ -3,10 +3,12 @@
 The writer runs after the optimizer and the validator, so it can only decorate the
 route, never change it. Its input is the source text of every stop, and it is told
 to use nothing else. The output is checked against the plan (unknown place ids are
-ignored), and an LLM failure returns the plan without texts instead of failing
-the request: the UI then shows each stop's research reason.
+ignored), and an LLM failure or an answer slower than WRITER_TIMEOUT_S returns the
+plan without texts instead of failing the request: the UI then shows each stop's
+research reason.
 """
 
+import asyncio
 import json
 from typing import Any
 
@@ -17,6 +19,7 @@ from app.llm import LLM, LLMError
 from app.models import Plan, Stop
 
 SOURCE_TEXT_CHARS = 1200
+WRITER_TIMEOUT_S = 60
 # Tags the sources keep (osm.KEPT_TAGS, Wikivoyage's price) that describe what a
 # visitor sees or needs. Address and contact tags are left out: they add nothing to
 # a blurb and invite the model to pad it. Architect, artist and date are already in
@@ -54,8 +57,9 @@ async def write_texts(llm: LLM, plan: Plan) -> Plan:
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     try:
-        texts = await llm.structured(messages, PlanTexts)
-    except LLMError:
+        async with asyncio.timeout(WRITER_TIMEOUT_S):
+            texts = await llm.structured(messages, PlanTexts)
+    except (LLMError, TimeoutError):
         return plan
 
     by_id = {entry.place_id: entry for entry in texts.stops if entry.blurb.strip()}

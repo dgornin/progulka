@@ -20,7 +20,6 @@ import asyncio
 import json
 import logging
 from collections import Counter
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -34,12 +33,11 @@ from app.agent.tools import (
     tool_schemas,
 )
 from app.llm import LLM, LLMError, ToolCall
-from app.models import AgentEvent, Candidate
+from app.models import AgentEvent, Candidate, Emit
 from app.sources import osm
 
 log = logging.getLogger(__name__)
 
-Emit = Callable[[AgentEvent], Awaitable[None]]
 StopReason = Literal[
     "finished", "max_steps", "time_budget", "repeated_action", "no_tool_calls", "llm_error"
 ]

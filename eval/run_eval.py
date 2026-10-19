@@ -4,8 +4,9 @@ For every request in queries.json we build two plans with the SAME model:
 - agent: the full pipeline (tools, optimizer, validator);
 - baseline: one prompt, no tools — "plan a walking route, return JSON".
 Then both are checked by the same code:
-- found: the place can be located in OpenStreetMap inside the city (agent places
-  come from the sources, baseline places are geocoded by name);
+- real places (located): the stop has coordinates. Agent stops are source records
+  with coordinates, so this column is full by construction; a baseline stop counts
+  when its name is found in OpenStreetMap (Nominatim) inside the city;
 - closed: stops whose known opening hours say "closed" at the planned time;
 - impossible legs: the time between two stops is shorter than the walk itself;
 - over window: the plan ends after the requested end time;
@@ -200,7 +201,7 @@ def _at(brief: TripBrief, hhmm: str) -> datetime:
 
 def to_markdown(rows: list[dict]) -> str:
     head = (
-        "| query | system | stops | found in OSM | closed at visit | impossible legs "
+        "| query | system | stops | real places (located) | closed at visit | impossible legs "
         "| over window | walk km | LLM calls | cost $ | s |\n"
         "|---|---|---|---|---|---|---|---|---|---|---|\n"
     )
@@ -260,7 +261,10 @@ async def main() -> None:
     slug = base.model.replace("/", "__").replace(":", "_")
     (out / f"{slug}.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2))
     (out / f"{slug}.md").write_text(
-        f"Model: `{base.model}`, queries anchored at {TODAY.isoformat()}.\n\n" + to_markdown(rows)
+        f"Model: `{base.model}`, queries anchored at {TODAY.isoformat()}. "
+        "Agent stops are source records with coordinates, so they are located by "
+        "construction; for the baseline, located means found in OpenStreetMap.\n\n"
+        + to_markdown(rows)
     )
 
 

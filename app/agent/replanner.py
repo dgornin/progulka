@@ -4,6 +4,8 @@ The model resolves references ("the second museum", "the cathedral") against a
 numbered list of the current stops and says what changes; it does not rebuild the
 route itself. Code then re-runs research (only when research_goal is set), the
 optimizer and the validator, so a re-plan obeys the same checks as the first plan.
+What code cannot apply (ids that are not stops, an empty time window) is dropped,
+and a note in the reply says so: the model wrote the reply before these checks.
 """
 
 from pydantic import BaseModel, Field
@@ -11,6 +13,17 @@ from pydantic import BaseModel, Field
 from app.agent.prompts import REPLANNER
 from app.llm import LLM
 from app.models import Interest, LocalTime, Plan
+
+NOTES = {
+    "ru": {
+        "stops": " Не нашёл в маршруте остановок, которые нужно убрать.",
+        "time": " Время оставляю прежним: окно {start}–{end} получилось пустым.",
+    },
+    "en": {
+        "stops": " I did not find the stops to remove in the route.",
+        "time": " The times stay as they were: the window {start}–{end} would be empty.",
+    },
+}
 
 
 class PlanEdit(BaseModel):
@@ -41,13 +54,18 @@ async def interpret_feedback(llm: LLM, plan: Plan, feedback: str) -> PlanEdit:
         {"role": "user", "content": _context(plan) + f"\n\nFeedback: {feedback}"},
     ]
     edit = await llm.structured(messages, PlanEdit)
+    notes = NOTES[plan.brief.language]
 
     in_plan = {stop.place.id for stop in plan.stops}
-    edit.exclude_place_ids = [i for i in dict.fromkeys(edit.exclude_place_ids) if i in in_plan]
+    asked = list(dict.fromkeys(edit.exclude_place_ids))
+    edit.exclude_place_ids = [i for i in asked if i in in_plan]
+    if asked and not edit.exclude_place_ids:
+        edit.reply += notes["stops"]
     start = edit.start_time or plan.brief.start_time
     end = edit.end_time or plan.brief.end_time
     if end <= start:  # an empty window cannot be planned: keep the current times
         edit.start_time = edit.end_time = None
+        edit.reply += notes["time"].format(start=f"{start:%H:%M}", end=f"{end:%H:%M}")
     return edit
 
 

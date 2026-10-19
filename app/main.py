@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from app.agent.tools import tool_schemas
 from app.config import settings
 from app.llm import LLM, LLMError
-from app.models import AgentEvent
+from app.models import AgentEvent, Emit
 from app.pipeline import (
     FeedbackRequest,
     PipelineError,
@@ -48,7 +48,6 @@ app = FastAPI(
 )
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-Emit = Callable[[AgentEvent], Awaitable[None]]
 Job = Callable[[LLM, Emit], Awaitable[tuple[Session, str | None]]]
 
 
@@ -71,7 +70,7 @@ async def tools() -> list[dict[str, Any]]:
 @app.post("/api/plan")
 async def plan(req: PlanRequest) -> StreamingResponse:
     async def job(llm: LLM, emit: Emit) -> tuple[Session, str | None]:
-        return await plan_trip(req, llm, emit, today=date.today()), None
+        return await plan_trip(req, llm, emit, today=settings.today or date.today()), None
 
     return _stream(job)
 

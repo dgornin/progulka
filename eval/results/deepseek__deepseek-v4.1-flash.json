@@ -1,0 +1,154 @@
+[
+  {
+    "id": "spb-constructivism",
+    "model": "deepseek/deepseek-v4.1-flash",
+    "agent": {
+      "stops": 15,
+      "found": 15,
+      "closed": 0,
+      "impossible_legs": 0,
+      "over_window": false,
+      "walk_km": 9.0,
+      "llm_calls": 13,
+      "cost_usd": 0.0099,
+      "seconds": 65.6
+    },
+    "agent_stops": [
+      "Стардогs",
+      "Вкусно — и точка",
+      "Тили-тесто",
+      "Туристы",
+      "Карета",
+      "Петроградское общество электрических сооружений (ТЭЦ-2)",
+      "Дом Бассейного товарищества",
+      "Мальцевский рынок",
+      "Мурал",
+      "Столовая №3",
+      "Abbey Road",
+      "Михаил Горшенёв",
+      "Дом-коммуна инженеров и писателей",
+      "Тяговая подстанция № 11",
+      "Большой дом"
+    ],
+    "baseline": {
+      "stops": 11,
+      "found": 11,
+      "closed": 0,
+      "impossible_legs": 7,
+      "over_window": false,
+      "walk_km": 72.7,
+      "llm_calls": 1,
+      "cost_usd": 0.0005,
+      "seconds": 30.3
+    },
+    "baseline_stops": [
+      "Московский вокзал",
+      "Конструктивизм: Дом Ленинградского отделения треста «Ленстрой»",
+      "Конструктивизм: Круглый дом",
+      "Конструктивизм: Дом-коммуна инженеров и писателей",
+      "Стрит-арт: стена на Московском проспекте",
+      "Уличная еда: фудкорт «Лиговский»",
+      "Стрит-арт: дворы на Пушкинской",
+      "Стрит-арт: пространство «Люмьер-Холл»",
+      "Конструктивизм: Дом-коммуна «Обводный»",
+      "Стрит-арт: стена на Московском проспекте (у метро «Фрунзенская»)",
+      "Уличная еда: фудкорт «Московский»"
+    ]
+  },
+  {
+    "id": "kazan-history",
+    "model": "deepseek/deepseek-v4.1-flash",
+    "agent": {
+      "stops": 13,
+      "found": 13,
+      "closed": 0,
+      "impossible_legs": 0,
+      "over_window": false,
+      "walk_km": 5.1,
+      "llm_calls": 7,
+      "cost_usd": 0.0097,
+      "seconds": 35.5
+    },
+    "agent_stops": [
+      "Благовещенский собор",
+      "Башня Сююмбике",
+      "Южный корпус пушечного двора",
+      "Тимерхан",
+      "Кул-Шариф",
+      "Бәхетле",
+      "Церковь Параскевы Пятницы",
+      "Казанский Богородицкий монастырь",
+      "Петропавловский собор",
+      "Сенной базар (Казань)",
+      "Мечеть Нурулла",
+      "Галеевская мечеть",
+      "Голубая мечеть (Казань)"
+    ],
+    "baseline": {
+      "stops": 7,
+      "found": 7,
+      "closed": 0,
+      "impossible_legs": 5,
+      "over_window": false,
+      "walk_km": 18.7,
+      "llm_calls": 1,
+      "cost_usd": 0.0003,
+      "seconds": 7.2
+    },
+    "baseline_stops": [
+      "Казанский Кремль",
+      "Мечеть Кул-Шариф",
+      "Благовещенский собор",
+      "Дом татарской кулинарии",
+      "Национальный музей Республики Татарстан",
+      "Церковь Святой Варвары",
+      "Мечеть Марджани"
+    ]
+  },
+  {
+    "id": "paris-impressionism",
+    "model": "deepseek/deepseek-v4.1-flash",
+    "agent": {
+      "stops": 8,
+      "found": 8,
+      "closed": 0,
+      "impossible_legs": 0,
+      "over_window": false,
+      "walk_km": 3.6,
+      "llm_calls": 10,
+      "cost_usd": 0.0143,
+      "seconds": 69.1
+    },
+    "agent_stops": [
+      "Petit Palais, Musée des beaux-arts de la Ville de Paris",
+      "Musée de l'Orangerie",
+      "Librairie du Jeu de Paume",
+      "Copains Rue Royale",
+      "Ladurée",
+      "Smith&Son",
+      "Angelina",
+      "Librairie du musée"
+    ],
+    "baseline": {
+      "stops": 8,
+      "found": 8,
+      "closed": 4,
+      "impossible_legs": 3,
+      "over_window": false,
+      "walk_km": 15.5,
+      "llm_calls": 1,
+      "cost_usd": 0.0001,
+      "seconds": 2.4
+    },
+    "baseline_stops": [
+      "Place de la Concorde",
+      "Musée de l'Orangerie",
+      "Galerie Vivienne",
+      "Librairie Jousseaume",
+      "Boulangerie Bo",
+      "Musée Jacquemart-André",
+      "Librairie Auguste Blaizot",
+      "Place de la Concorde"
+    ]
+  }
+]

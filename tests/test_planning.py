@@ -17,7 +17,7 @@ from app.planning import routing
 from app.planning.geo import haversine_m, street_meters, walk_limit_km, walk_minutes
 from app.planning.hours import earliest_open_at_or_after, is_open, open_intervals
 from app.planning.optimizer import optimize, schedule
-from app.planning.validator import has_errors, validate
+from app.planning.validator import matches_avoid, names_place, validate
 from app.sources.http import SourceError, http
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -346,7 +346,6 @@ async def test_walking_route_reads_osrm(monkeypatch):
 
     assert route.geometry[0] == [59.939503, 30.31507]  # GeoJSON [lon, lat] turned into [lat, lon]
     assert route.leg_meters == [1087.7, 1299.3]
-    assert route.leg_seconds == [871.9, 1043.3]
 
 
 @pytest.mark.parametrize(
@@ -426,7 +425,6 @@ def test_clean_plan_has_no_violations():
         interests=[Interest(label="history", weight=1), Interest(label="coffee", weight=0.5)]
     )
     assert validate(plan) == []
-    assert not has_errors(validate(plan))
 
 
 RAIN_AT_NOON = [HourWeather(time=_at(WEDNESDAY, "12:00"), precipitation_mm=1.2)]
@@ -454,18 +452,47 @@ RAIN_AT_NOON = [HourWeather(time=_at(WEDNESDAY, "12:00"), precipitation_mm=1.2)]
             id="interest",
         ),
         pytest.param(_plan(stops=1), None, "too_few_stops", "error", id="one-stop"),
+        pytest.param(
+            _plan(must_include=["Эрмитаж"]), None, "missing_must_include", "warning", id="must"
+        ),
     ],
 )
 def test_each_violation(plan, weather, code, severity):
     violations = validate(plan, weather)
     assert [(v.code, v.severity) for v in violations] == [(code, severity)]
-    assert has_errors(violations) == (severity == "error")
 
 
 def test_avoid_phrase_matches_whole_words_of_the_name():
     plan = _plan(avoid=["кафе"])
     plan.stops[0].place.name = "Кафедральный собор"  # "кафе" is only the start of a word here
     assert validate(plan) == []
+
+
+@pytest.mark.parametrize(
+    "avoid, kind, name, expected",
+    [
+        ("музеи", "landmark", "Русский музей", True),  # a Wikipedia place: the name decides
+        ("храмы", "landmark", "Исаакиевский собор", True),
+        ("кафе", "cafe", "Кофемания", True),
+        ("бары", "landmark", "Дом Баранова", False),  # short stems never match names
+        ("кафе", "landmark", "Кафедральный собор", False),
+    ],
+)
+def test_avoid_matches_kind_or_a_word_of_the_name(avoid, kind, name, expected):
+    assert matches_avoid(avoid, kind, name) is expected
+
+
+@pytest.mark.parametrize(
+    "wanted, name, expected",
+    [
+        ("Казанский собор", "Казанский кафедральный собор", True),
+        ("Эрмитаж", "Государственный Эрмитаж", True),
+        ("Спас на Крови", "Храм Спаса на Крови", True),
+        ("Эрмитаж", "Эрмитажный театр", False),
+    ],
+)
+def test_names_place_matches_words_not_substrings(wanted, name, expected):
+    assert names_place(wanted, name) is expected
 
 
 def test_messages_name_the_place_and_time():

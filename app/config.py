@@ -6,6 +6,7 @@ image runs on a laptop and on a server; docker compose passes .env via env_file.
 
 import os
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -30,6 +31,9 @@ class Settings:
     cache_dir: Path
     overpass_urls: tuple[str, ...]  # tried in order; the last one that answered is tried first
     llm_replay: bool  # serve repeated LLM requests from the on-disk cache (demo insurance)
+    # Pins "today": the brief prompt and the dates it resolves depend on it, so without
+    # the pin a run rehearsed yesterday does not replay from the cache.
+    today: date | None
 
 
 def load_settings() -> Settings:
@@ -53,6 +57,7 @@ def load_settings() -> Settings:
             if url.strip()
         ),
         llm_replay=_env("LLM_REPLAY", "0") == "1",
+        today=date.fromisoformat(pinned) if (pinned := _env("TODAY", "")) else None,
     )
 
 

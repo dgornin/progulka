@@ -10,8 +10,11 @@ map and text it can quote, without a request per page.
 city instead of the general article about the art movement.
 """
 
+from typing import Any
+from urllib.parse import urlparse
+
 from app.models import GeoPoint, Place
-from app.sources.http import http
+from app.sources.http import SourceError, http
 
 MAX_GEOSEARCH_RADIUS_M = 10_000  # API limit for list=geosearch
 MAX_DESCRIPTION_CHARS = 500
@@ -30,7 +33,7 @@ EXTRACT_PARAMS = {
 
 
 async def nearby(center: GeoPoint, radius_m: int, lang: str = "ru", limit: int = 30) -> list[Place]:
-    payload = await http.get_json(
+    payload = await query_mediawiki(
         _api_url(lang),
         {
             "action": "query",
@@ -47,7 +50,7 @@ async def nearby(center: GeoPoint, radius_m: int, lang: str = "ru", limit: int =
 async def search(
     query: str, center: GeoPoint, radius_m: int, lang: str = "ru", limit: int = 20
 ) -> list[Place]:
-    payload = await http.get_json(
+    payload = await query_mediawiki(
         _api_url(lang),
         {
             "action": "query",
@@ -67,7 +70,7 @@ async def page_extract(place_id: str, max_chars: int = 1500) -> str | None:
     if len(parts) != 3 or parts[0] != "wikipedia":
         raise ValueError(f"Not a Wikipedia place id: {place_id}")
     _, lang, pageid = parts
-    payload = await http.get_json(
+    payload = await query_mediawiki(
         _api_url(lang),
         {
             "action": "query",
@@ -82,6 +85,20 @@ async def page_extract(place_id: str, max_chars: int = 1500) -> str | None:
     pages = payload.get("query", {}).get("pages", [])
     text = pages[0].get("extract") if pages else None
     return _shorten(text, max_chars) if text else None
+
+
+async def query_mediawiki(api_url: str, params: dict[str, Any]) -> dict:
+    """One MediaWiki API request (Wikipedia and Wikivoyage).
+
+    MediaWiki reports its errors with HTTP 200 ("search is currently too busy"). Read
+    as a payload, such an answer is "nothing found", and cached it would stay that for
+    a week; as a SourceError it is a tool error the agent sees, and it is not cached.
+    """
+    payload = await http.get_json(api_url, params, cacheable=lambda p: "error" not in p)
+    if "error" in payload:
+        info = payload["error"].get("info", "API error")
+        raise SourceError(f"{urlparse(api_url).netloc}: {info}")
+    return payload
 
 
 def _api_url(lang: str) -> str:

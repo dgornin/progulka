@@ -33,7 +33,6 @@ class CityInfo(BaseModel):
     name: str
     center: GeoPoint
     bbox: tuple[float, float, float, float]  # (south, west, north, east)
-    country_code: str | None
 
 
 async def locate_city(city: str, country: str | None = None) -> CityInfo | None:
@@ -57,7 +56,6 @@ async def locate_city(city: str, country: str | None = None) -> CityInfo | None:
         name=name,
         center=GeoPoint(lat=float(best["lat"]), lon=float(best["lon"]), label=name),
         bbox=(south, west, north, east),
-        country_code=best.get("address", {}).get("country_code"),
     )
 
 

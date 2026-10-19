@@ -3,10 +3,11 @@
 The optimizer works with estimated distances (geo.py); once the order is fixed we
 ask OSRM (the public foot-profile server of routing.openstreetmap.de) for one
 route through all stops. It gives the polyline for the map and the real length of
-every leg, which schedule() then uses instead of the estimate. The public server
-is best-effort, so on any failure we return None and the caller keeps the
-estimate and draws straight lines. For the same reason the wait is capped: the
-shared HTTP client retries for up to two minutes, and a nicer line on the map is
+every leg, which schedule() then uses instead of the estimate. OSRM's durations are
+not used: walking time comes from the traveller's pace (geo.walk_minutes).
+The public server is best-effort, so on any failure we return None and the caller
+keeps the estimate and draws straight lines. For the same reason the wait is capped:
+the shared HTTP client retries for up to two minutes, and a nicer line on the map is
 not worth that.
 """
 
@@ -26,7 +27,6 @@ ROUTE_TIMEOUT_S = 20.0
 class RouteResult:
     geometry: list[list[float]]  # [lat, lon]
     leg_meters: list[float]
-    leg_seconds: list[float]
 
 
 async def walking_route(points: list[GeoPoint]) -> RouteResult | None:
@@ -49,7 +49,6 @@ async def walking_route(points: list[GeoPoint]) -> RouteResult | None:
     return RouteResult(
         geometry=_thin(line),
         leg_meters=[leg["distance"] for leg in route["legs"]],
-        leg_seconds=[leg["duration"] for leg in route["legs"]],
     )
 
 

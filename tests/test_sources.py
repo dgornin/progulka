@@ -1,20 +1,24 @@
 """Data-source parsers and ranking, against responses recorded from the real APIs.
 
 The shared HTTP client is replaced by a fake that returns fixtures and records the
-requests, so the tests run offline and also check what we ask the APIs for.
+requests, so the tests run offline and also check what we ask the APIs for. The
+client itself is tested last, against a mock transport.
 """
 
+import asyncio
 import json
+from collections import Counter
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.config import settings
 from app.models import GeoPoint, HourWeather
 from app.planning.geo import haversine_m
 from app.sources import geocode, osm, weather, wikipedia, wikivoyage
-from app.sources.http import SourceError, http
+from app.sources.http import MIN_INTERVAL, HttpClient, SourceError, http
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -56,7 +60,6 @@ async def test_locate_city_takes_the_settlement_not_the_federal_subject(api):
     assert city.center.lon == pytest.approx(30.32, abs=0.01)
     south, west, north, east = city.bbox
     assert south < city.center.lat < north and west < city.center.lon < east
-    assert city.country_code == "ru"
 
 
 async def test_geocode_is_bounded_to_the_city_and_prefers_the_notable_match(api):
@@ -202,6 +205,13 @@ async def test_page_extract_is_cut_at_a_sentence(api):
     assert len(text) <= 600 and text.endswith(".")
 
 
+async def test_mediawiki_error_with_http_200_is_a_source_error(api):
+    api.responses = [{"error": {"code": "search-error", "info": "Search is currently too busy"}}]
+
+    with pytest.raises(SourceError, match="too busy"):
+        await wikipedia.search("конструктивизм", GeoPoint(lat=59.9343, lon=30.3351), 5000)
+
+
 async def test_wikivoyage_falls_back_to_district_pages(api):
     # The ru city page has no listings with coordinates, only the district list.
     api.responses = [fixture("wikivoyage_spb_city"), fixture("wikivoyage_spb_districts")]
@@ -259,6 +269,17 @@ async def test_wikivoyage_strips_markup_and_keeps_requested_sections(api):
     assert {p.kind for p in places} == {"sight", "activity"}
 
 
+def test_wikivoyage_skips_listings_without_finite_coordinates_and_strips_escaped_tags():
+    text = (
+        "{{see|name=Nowhere|lat=nan|long=30.3}} {{see|name=Far|lat=59.9|long=inf}}"
+        "{{see|name=Кафе &lt;img src=x onerror=alert(1)&gt;|lat=59.9|long=30.3}}"
+    )
+
+    places = wikivoyage._parse_listings(text, "Page", "ru", {"see"})
+
+    assert [p.name for p in places] == ["Кафе"]
+
+
 async def test_wikivoyage_rejects_unknown_sections(api):
     with pytest.raises(ValueError, match="sleep"):
         await wikivoyage.listings("Paris", lang="en", sections=["see", "sleep"])
@@ -268,7 +289,7 @@ async def test_weather_hourly_parses_naive_local_time(api):
     api.responses = [fixture("open_meteo")]
     day = date.today() + timedelta(days=1)
 
-    hours = await weather.hourly(GeoPoint(lat=59.94, lon=30.32), day)
+    hours = await weather.hourly(GeoPoint(lat=59.94, lon=30.32), day, date.today())
 
     assert api.requests[0][1]["start_date"] == api.requests[0][1]["end_date"] == day.isoformat()
     assert len(hours) == 24
@@ -280,7 +301,7 @@ async def test_weather_hours_past_the_forecast_horizon_are_dropped(api):
     # On the last forecast day Open-Meteo returns nulls after 06:00.
     api.responses = [fixture("open_meteo_last_day")]
 
-    hours = await weather.hourly(GeoPoint(lat=59.94, lon=30.32), date.today())
+    hours = await weather.hourly(GeoPoint(lat=59.94, lon=30.32), date.today(), date.today())
 
     assert [h.time.hour for h in hours] == [0, 1, 2, 3, 4, 5]
     assert weather.summarize(hours, time(10), time(18)) == "прогноза нет"
@@ -290,7 +311,7 @@ async def test_weather_hours_past_the_forecast_horizon_are_dropped(api):
 async def test_weather_outside_forecast_range_is_empty(api, days_ahead):
     day = date.today() + timedelta(days=days_ahead)
 
-    assert await weather.hourly(GeoPoint(lat=59.94, lon=30.32), day) == []
+    assert await weather.hourly(GeoPoint(lat=59.94, lon=30.32), day, date.today()) == []
     assert api.requests == []
 
 
@@ -317,3 +338,30 @@ def test_summarize_reports_temperature_and_rain_spans():
     cold = [_hour(10, -0.4, 0), _hour(11, 2, 0)]
     assert weather.summarize(cold, time(10), time(12)) == "0…+2 °C, без осадков"
     assert weather.summarize([], time(10), time(18)) == "прогноза нет"
+
+
+async def test_only_rate_limited_hosts_get_one_request_at_a_time(monkeypatch):
+    in_flight: Counter[str] = Counter()
+    most: Counter[str] = Counter()
+
+    async def server(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        in_flight[host] += 1
+        most[host] = max(most[host], in_flight[host])
+        await asyncio.sleep(0.01)
+        in_flight[host] -= 1
+        return httpx.Response(200, json={})
+
+    client = HttpClient(cache_dir=None, user_agent="test")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(server))
+    monkeypatch.setitem(MIN_INTERVAL, "limited.test", 0)
+
+    await asyncio.gather(
+        *(
+            client.get_json(f"https://{host}/", {"n": n})
+            for host in ("limited.test", "free.test")
+            for n in range(3)
+        )
+    )
+
+    assert most == {"limited.test": 1, "free.test": 3}

@@ -25,8 +25,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from app.models import Candidate, GeoPoint, Place, TripBrief
+from app.models import MUST_HAVE_WEIGHT, Candidate, GeoPoint, Place, TripBrief
 from app.planning.geo import haversine_m
+from app.planning.validator import names_place
 from app.sources import osm, wikipedia, wikivoyage
 from app.sources.http import SourceError
 
@@ -38,7 +39,6 @@ SNIPPET_CHARS = 160
 REASON_CHARS = 220
 MAX_DETAIL_TAGS = 40
 DEFAULT_VISIT_MINUTES = 30
-STRONG_INTEREST = 0.7
 FINISH_ATTEMPTS = 3
 SAME_PLACE_M = 150
 LINK_TAGS = ("wikidata", "wikipedia")  # OSM and the Wikipedia source both fill these
@@ -147,7 +147,8 @@ class RemovePlace(BaseModel):
 
 class FinishResearch(BaseModel):
     """Finish the research when the shortlist is ready. It is rejected, with the reason,
-    while the shortlist is too small or a strong interest has no candidate."""
+    while the shortlist is too small or an interest with weight 0.7 or more has no
+    candidate."""
 
     summary: str = Field(..., description="One or two sentences on what was found")
 
@@ -285,14 +286,13 @@ async def _shortlist_place(state: ResearchState, args: ShortlistPlace) -> ToolOu
         raise ToolRejected(
             f"'{place.name}' is the same place as shortlisted '{duplicate.name}' ({duplicate.id})"
         )
-    must_include = [name.casefold() for name in state.brief.must_include]
     candidate = Candidate(
         place=place,
         score=args.score,
         interests=[labels[label.casefold()] for label in args.interests],
         reason=args.reason,
         visit_minutes=args.visit_minutes or _default_visit_minutes(place.kind),
-        required=any(name in place.name.casefold() for name in must_include),
+        required=any(names_place(wanted, place.name) for wanted in state.brief.must_include),
     )
     state.shortlist[place.id] = candidate
     return ToolOutcome(
@@ -425,16 +425,17 @@ def _missing_for_finish(state: ResearchState) -> list[str]:
         missing.append(f"the shortlist has {len(state.shortlist)} places, need at least {need}")
     covered = {label.casefold() for c in state.shortlist.values() for label in c.interests}
     for interest in state.brief.interests:
-        if interest.weight >= STRONG_INTEREST and interest.label.casefold() not in covered:
+        if interest.weight >= MUST_HAVE_WEIGHT and interest.label.casefold() not in covered:
             missing.append(f"no candidate for the interest '{interest.label}'")
+    for wanted in state.brief.must_include:
+        if not any(names_place(wanted, c.place.name) for c in state.shortlist.values()):
+            missing.append(f"must_include '{wanted}' is not on the shortlist: search it by name")
     return missing
 
 
 def _default_visit_minutes(kind: str) -> int:
-    for key, spec in osm.CATEGORIES.items():
-        if kind in (key, spec.kind):
-            return spec.visit_minutes
-    return DEFAULT_VISIT_MINUTES
+    spec = osm.CATEGORIES.get(kind)
+    return spec.visit_minutes if spec else DEFAULT_VISIT_MINUTES
 
 
 def _candidate_event(action: str, candidate: Candidate, reason: str) -> dict[str, Any]:

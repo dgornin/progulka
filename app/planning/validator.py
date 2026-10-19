@@ -11,13 +11,10 @@ fixed; warnings are shown to the traveller.
 import re
 from datetime import datetime, timedelta
 
-from app.models import HourWeather, Plan, Stop, TripBrief, Violation
+from app.models import MUST_HAVE_WEIGHT, HourWeather, Plan, Stop, TripBrief, Violation
 from app.planning.geo import walk_limit_km
 from app.planning.hours import is_open, open_intervals
-
-RAIN_PROBABILITY = 50  # %
-RAIN_MM = 0.3  # per hour
-INTEREST_MUST_HAVE = 0.7
+from app.sources.weather import is_rainy
 
 # Kinds whose visit fails if the place is closed. A monument or a park is
 # "open" from the street, so missing hours there are not worth a warning.
@@ -29,11 +26,17 @@ HOURS_MATTER = (
 
 # Kinds excluded by common "avoid" phrases (ru/en), found by word stems:
 # a word of the phrase matches when it starts with a stem ("без музеев" -> "музе").
+# A place of another kind still matches when a word of its name is a long stem plus
+# an ending: Wikipedia ("landmark") and Wikivoyage ("sight") kinds do not say that
+# "Русский музей" is a museum. Short stems ("бар", "пив") would hit "Дом Баранова".
 AVOID_RULES: list[tuple[set[str], tuple[str, ...]]] = [
     ({"museum", "gallery"}, ("музе", "museum")),
     ({"gallery"}, ("галере", "galler")),
     ({"church"}, ("церк", "храм", "собор", "church", "cathedral")),
     ({"bar", "pub"}, ("бар", "паб", "алкогол", "пив", "bar", "pub", "alcohol", "beer")),
+    ({"cafe", "bakery"}, ("кафе", "кофе", "cafe", "coffee")),
+    ({"restaurant", "food"}, ("ресторан", "restaurant")),
+    ({"street_food"}, ("фастфуд", "стритфуд", "fast")),
     ({"theatre"}, ("театр", "theat")),
     ({"cinema"}, ("кино", "cinema")),
     ({"park", "garden"}, ("парк", "park")),
@@ -41,6 +44,7 @@ AVOID_RULES: list[tuple[set[str], tuple[str, ...]]] = [
     ({"market"}, ("рын", "market")),
     ({"monument", "memorial"}, ("памятник", "мемориал", "monument", "memorial")),
 ]
+NAME_STEM_MIN = 4
 
 MESSAGES = {
     "ru": {
@@ -54,6 +58,7 @@ MESSAGES = {
         "long_walk": "Пешком {km:.1f} км — больше лимита {limit:g} км",
         "uncovered_interest": "В маршруте нет ничего про «{label}»",
         "too_few_stops": "В маршруте меньше двух остановок",
+        "missing_must_include": "«{name}», о котором вы просили, не попало в маршрут",
     },
     "en": {
         "closed_at_visit": "{name} is closed at {begin}–{end}; {hours}",
@@ -66,6 +71,7 @@ MESSAGES = {
         "long_walk": "{km:.1f} km on foot, over the {limit:g} km limit",
         "uncovered_interest": "No stop covers “{label}”",
         "too_few_stops": "The route has fewer than two stops",
+        "missing_must_include": "{name}, which you asked for, is not in the route",
     },
 }
 
@@ -73,13 +79,7 @@ MESSAGES = {
 def rain_during(weather: list[HourWeather] | None, start: datetime, end: datetime) -> bool:
     """True if any forecast hour overlapping [start, end) is rainy."""
     return any(
-        h.time < end
-        and h.time + timedelta(hours=1) > start
-        and (
-            (h.precipitation_probability or 0) >= RAIN_PROBABILITY
-            or (h.precipitation_mm or 0) >= RAIN_MM
-        )
-        for h in weather or []
+        h.time < end and h.time + timedelta(hours=1) > start and is_rainy(h) for h in weather or []
     )
 
 
@@ -91,10 +91,6 @@ def validate(plan: Plan, weather: list[HourWeather] | None = None) -> list[Viola
         found += _stop_violations(stop, plan.brief, weather, text)
     found += _route_violations(plan, text)
     return sorted(found, key=lambda v: v.severity != "error")
-
-
-def has_errors(violations: list[Violation]) -> bool:
-    return any(v.severity == "error" for v in violations)
 
 
 def _stop_violations(
@@ -119,7 +115,7 @@ def _stop_violations(
     if place.indoor is False and rain_during(weather, stop.arrive, stop.depart):
         found.append(_violation("rain_outdoor", "warning", text, place.id, **when))
     for avoid in brief.avoid:
-        if _matches_avoid(avoid, place.kind, place.name):
+        if matches_avoid(avoid, place.kind, place.name):
             found.append(
                 _violation("avoid_violation", "error", text, place.id, avoid=avoid, **when)
             )
@@ -146,25 +142,53 @@ def _route_violations(plan: Plan, text: dict[str, str]) -> list[Violation]:
         )
     covered = {label.strip().lower() for stop in plan.stops for label in stop.interests}
     for interest in brief.interests:
-        if interest.weight >= INTEREST_MUST_HAVE and interest.label.strip().lower() not in covered:
+        if interest.weight >= MUST_HAVE_WEIGHT and interest.label.strip().lower() not in covered:
             found.append(_violation("uncovered_interest", "warning", text, label=interest.label))
+    for wanted in brief.must_include:
+        if not any(names_place(wanted, stop.place.name) for stop in plan.stops):
+            found.append(_violation("missing_must_include", "warning", text, name=wanted))
     return found
 
 
-def _matches_avoid(avoid: str, kind: str, name: str) -> bool:
-    """The place's kind is excluded by the phrase, or the phrase is part of its name.
+def matches_avoid(avoid: str, kind: str, name: str) -> bool:
+    """The phrase excludes the place: by its kind, by a word of its name (a long stem
+    plus at most three letters), or the phrase is part of the name.
 
-    The name must contain the phrase as whole words: "кафе" is not in "Кафедральный
-    собор", "pub" is not in "Public Library". A false match is an error that makes
-    the agent drop a good place.
+    Names are matched by whole words: "кафе" is not in "Кафедральный собор", "pub" is
+    not in "Public Library". A false match is an error that makes the agent drop a
+    good place.
     """
     phrase = avoid.strip().lower()
     if len(phrase) >= 3 and re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", name.lower()):
         return True
-    words = re.findall(r"\w+", phrase)
-    return any(
-        kind in kinds and any(w.startswith(stems) for w in words) for kinds, stems in AVOID_RULES
-    )
+    words = _words(phrase)
+    name_words = _words(name)
+    for kinds, stems in AVOID_RULES:
+        if not any(w.startswith(stems) for w in words):
+            continue
+        long_stems = [s for s in stems if len(s) >= NAME_STEM_MIN]
+        if kind in kinds or any(_inflects(w, s, 3) for w in name_words for s in long_stems):
+            return True
+    return False
+
+
+def names_place(wanted: str, name: str) -> bool:
+    """The traveller's name for a place is the source's name for it: every word of it is
+    a word of the name, give or take a case ending. "Казанский собор" is "Казанский
+    кафедральный собор" and "Спас на Крови" is "Храм Спаса на Крови", but "Эрмитаж"
+    is not "Эрмитажный театр".
+    """
+    words, have = _words(wanted), _words(name)
+    return bool(words) and all(any(_inflects(h, w, 2) for h in have) for w in words)
+
+
+def _inflects(word: str, stem: str, ending: int) -> bool:
+    """`word` is `stem` plus at most `ending` letters: an inflection, not another word."""
+    return word.startswith(stem) and len(word) - len(stem) <= ending
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"\w+", text.casefold())
 
 
 def _violation(

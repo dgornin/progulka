@@ -4,6 +4,7 @@ A Place always comes from a source (OpenStreetMap, Wikipedia, Wikivoyage) and ke
 its id and URL, so every stop in a plan can be traced back to where it was found.
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time
 from typing import Annotated, Any, Literal
 
@@ -17,9 +18,17 @@ SourceName = Literal["osm", "wikipedia", "wikivoyage"]
 Pace = Literal["relaxed", "normal", "active"]
 
 
+# Interests weighted at least this (a plain or a strong wish on the BRIEF prompt's
+# scale) must be covered: finish_research is refused while one has no candidate, and
+# the validator warns when no stop serves one. RESEARCHER states the same number.
+MUST_HAVE_WEIGHT = 0.7
+
+
 class Interest(BaseModel):
     label: str = Field(..., description="What the traveller wants, in their words: 'street art'")
-    weight: float = Field(1.0, ge=0, le=1, description="1 = must have, 0.3 = nice to have")
+    weight: float = Field(
+        1.0, ge=0, le=1, description="1.0 strong wish, 0.7 plain wish, 0.4 optional"
+    )
 
 
 class TripBrief(BaseModel):
@@ -104,6 +113,7 @@ class Violation(BaseModel):
         "long_walk",
         "uncovered_interest",
         "too_few_stops",
+        "missing_must_include",
     ]
     severity: Literal["error", "warning"]
     message: str
@@ -133,3 +143,7 @@ class AgentEvent(BaseModel):
 
     type: EventType
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+# How every layer reports progress: the pipeline and the agent call it, the API streams it.
+Emit = Callable[[AgentEvent], Awaitable[None]]

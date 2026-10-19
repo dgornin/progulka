@@ -760,7 +760,8 @@ a { color: var(--route-deep); }
 a.source:hover { text-decoration: underline; }
 span.source { color: var(--muted); }
 
-.remove {
+.remove,
+.stop-run {
   padding: 4px 12px;
   border: 1px solid var(--rule);
   border-radius: 8px;
@@ -769,7 +770,9 @@ span.source { color: var(--muted); }
   color: var(--ink-soft);
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.remove:hover:not(:disabled) { border-color: var(--red); background: var(--red-tint); color: var(--red); }
+.remove:hover:not(:disabled),
+.stop-run:hover { border-color: var(--red); background: var(--red-tint); color: var(--red); }
+.stop-run { justify-self: start; }
 
 .dropped {
   margin-top: 16px;

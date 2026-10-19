@@ -6,7 +6,9 @@ the traveller needs one line. Open-Meteo answers with the location's local time
 
 Open-Meteo forecasts 16 days (today + 15) and answers HTTP 400 outside that
 window. A trip planned for a day without a forecast is normal, so such a day
-gives an empty list and no request is made.
+gives an empty list and no request is made. "Today" comes from the caller, so a
+pinned date (TODAY in config) gives the same answer, from the cache, as on the day
+it was rehearsed.
 """
 
 from datetime import date, datetime, time, timedelta
@@ -16,8 +18,8 @@ from app.sources.http import http
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 FORECAST_DAYS_AHEAD = 15
-# An hour counts as rainy above either threshold; planning/validator.py uses the
-# same numbers, so the summary and the rain warnings agree.
+# An hour counts as rainy above either threshold. The optimizer and the validator use
+# is_rainy too, so the summary, the route order and the rain warnings agree.
 RAIN_PROBABILITY = 50  # percent
 RAIN_MM = 0.3  # per hour
 
@@ -27,8 +29,7 @@ PHRASES = {
 }
 
 
-async def hourly(point: GeoPoint, day: date) -> list[HourWeather]:
-    today = date.today()
+async def hourly(point: GeoPoint, day: date, today: date) -> list[HourWeather]:
     if not today <= day <= today + timedelta(days=FORECAST_DAYS_AHEAD):
         return []
     payload = await http.get_json(
@@ -78,7 +79,7 @@ def summarize(hours: list[HourWeather], start: time, end: time, lang: str = "ru"
         low, high = _degrees(min(temps)), _degrees(max(temps))
         parts.append(f"{low} °C" if low == high else f"{low}…{high} °C")
 
-    rainy = [h for h in window if _is_rainy(h)]
+    rainy = [h for h in window if is_rainy(h)]
     if not rainy:
         parts.append(words["dry"])
     else:
@@ -106,7 +107,7 @@ def _spans(hours: list[HourWeather]) -> list[tuple[datetime, datetime]]:
     return spans
 
 
-def _is_rainy(hour: HourWeather) -> bool:
+def is_rainy(hour: HourWeather) -> bool:
     wet_chance = (hour.precipitation_probability or 0) >= RAIN_PROBABILITY
     wet_amount = (hour.precipitation_mm or 0) >= RAIN_MM
     return wet_chance or wet_amount
