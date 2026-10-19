@@ -7,6 +7,8 @@ LLM-агент, который строит **пеший маршрут по г�
 пешком, объяснением «почему это тебе» и ссылкой на источник. Маршрут можно править
 словами («после 15 обещают дождь», «убери второй собор») или кнопкой «Убрать».
 
+**Живая версия: <https://185-156-108-126.sslip.io>**
+
 Проект курса LLM Agents (НИУ ВШЭ, лектор А. Алгазинов). Презентация proposal —
 [`docs/proposal.pdf`](docs/proposal.pdf).
 
@@ -160,6 +162,8 @@ git clone https://github.com/dgornin/progulka && cd progulka
 cp .env.example .env    # ключ API, и обязательно лимиты: RATE_LIMIT_PER_HOUR, DAILY_BUDGET_USD, MAX_CONCURRENT_RUNS
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+Обновление: `git pull && docker compose -f docker-compose.prod.yml up -d --build`.
 
 `docker-compose.prod.yml` публикует наружу только [Caddy](https://caddyserver.com) (`deploy/Caddyfile`):
 он сам получает HTTPS-сертификат для `SITE_ADDRESS` и проксирует запросы в приложение,
