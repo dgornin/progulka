@@ -1,0 +1,23 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "pages": [
+   {
+    "pageid": 1697,
+    "ns": 0,
+    "title": "Санкт-Петербург",
+    "revisions": [
+     {
+      "slots": {
+       "main": {
+        "contentmodel": "wikitext",
+        "contentformat": "text/x-wiki",
+        "content": "==Районы==\n\n{{Regionlist|\n\nregionmap=Piter districts map Rus 2022.png |\nregionmaptext=Карта районов Петербурга |\nregionmapsize=600px |\n\nregion1name={{badge}} [[Санкт-Петербург/Центр|Центр]] |\nregion1color=#d5dc76ff|\nregion1items= |\nregion1description=Туристический и коммерческий центр города, где вы найдете Эрмитаж, Русский музей, Летний сад, Исаакиевский собор и много чего ещё |\n\nregion2name=[[Санкт-Петербург/Коломна|Коломна]]|\nregion2color=#578e86ff |\nregion2items= Тихий центральный район со своим характером|\nregion2description=|\n\nregion3name={{badge}} [[Санкт-Петербург/Васильевский остров|Васильевский остров]]|\nregion3color=#b383b3ff |\nregion3items= Cтрелка Васильевского острова, Кунсткамера, Академия Художеств, Эрарта|\nregion3description=|\n\nregion4name=[[Санкт-Петербург/Петроградская сторона|Петроградская сторона]] |\nregion4color=#d09440ff |\nregion4items= |\nregion4description= Петропавловская крепость, Аврора, ЦПКиО на Елагином острове, Стадион Зенит|\n\nregion5name=[[Санкт-Петербург/Север|Север]] |\nregion5color=#69999fff  |\nregion5items= Выборгская сторона, Просвет, Гражданка, Комендантский|\nregion5description= |\n\nregion6name=[[Санкт-Петербург/Правый берег|Правый берег]]  |\nregion6color=#71b37bff |\nregion6items= Ладожская, Большевики, Веселый поселок |\nregion6description= |\n\nregion7name=[[Санкт-Петербург/Обухово|Обухово]]  |\nregion7color=#ac5c91ff  |\nregion7items=Исторический промышленный район вдоль левого берега Невы|\nregion7description= |\n\nregion8name={{статус}}[[Санкт-Петербург/Волково и Купчино|Волково и Купчино]]  |\nregion8color=#d56d76ff  |\nregion8items=Легендарный спальный район с интересными кладбищами|\nregion8description= |\n\nregion9name={{badge}} [[Санкт-Петербург/Московский проспект|Московский проспект]]  |\nregion9color=#4f93c0ff  |\nregion9items=Лучшая советская архитектура Ленинграда, Гранд-Макет и парк Победы|\nregion9description= |\n\nregion10name=[[Санкт-Петербург/Юго-запад|Юго-Запад]]  |\nregion10color=#b5d29fff  |\nregion10items=Усадьбы Петергофской дороги в окружении промзон и новостроек|\nregion10description= |\n}}\n<br clear=\"all\" />\n\n==[[Пригороды Санкт-Петербурга|Пригороды]]==\nВокруг Петербурга расположены около десятка пригородов, очень разных. Часть из них (например, Петергоф) — знаменитые туристические места, другие (например, Колпино) — гораздо менее известны. Более подробно смотрите [[Пригороды Санкт-Петербурга|в обзорной статье]].\n\n"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

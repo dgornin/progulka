@@ -1,0 +1,44 @@
+[
+ {
+  "place_id": 169262509,
+  "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+  "osm_type": "node",
+  "osm_id": 1381217928,
+  "lat": "59.9314401",
+  "lon": "30.2916259",
+  "category": "amenity",
+  "type": "bar",
+  "place_rank": 30,
+  "importance": 8.232166018153685e-05,
+  "addresstype": "amenity",
+  "name": "Новая Голландия",
+  "display_name": "Новая Голландия, набережная Адмиралтейского канала, Адмиралтейский округ, Санкт-Петербург, Северо-Западный федеральный округ, 197000, Россия",
+  "boundingbox": [
+   "59.9313901",
+   "59.9314901",
+   "30.2915759",
+   "30.2916759"
+  ]
+ },
+ {
+  "place_id": 168685407,
+  "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+  "osm_type": "relation",
+  "osm_id": 1576204,
+  "lat": "59.9296159",
+  "lon": "30.2897346",
+  "category": "place",
+  "type": "island",
+  "place_rank": 17,
+  "importance": 0.41093751640421666,
+  "addresstype": "island",
+  "name": "остров Новая Голландия",
+  "display_name": "остров Новая Голландия, Адмиралтейский округ, Санкт-Петербург, Северо-Западный федеральный округ, Россия",
+  "boundingbox": [
+   "59.9280349",
+   "59.9312042",
+   "30.2860293",
+   "30.2934439"
+  ]
+ }
+]

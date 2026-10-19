@@ -1,0 +1,251 @@
+{
+ "version": 0.6,
+ "generator": "Overpass API 0.7.62.11 87bfad18",
+ "osm3s": {
+  "timestamp_osm_base": "2026-10-19T18:51:34Z",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+ },
+ "elements": [
+  {
+   "type": "node",
+   "id": 1024868065,
+   "lat": 59.9335762,
+   "lon": 30.3553937,
+   "tags": {
+    "material": "granite",
+    "name": "Природа и Человек",
+    "start_date": "1996",
+    "tourism": "artwork",
+    "wheelchair": "yes"
+   }
+  },
+  {
+   "type": "node",
+   "id": 2462663672,
+   "lat": 59.9302177,
+   "lon": 30.3598504,
+   "tags": {
+    "name": "МузЭрос",
+    "opening_hours": "24/7",
+    "phone": "+7 812 9050394",
+    "tourism": "museum",
+    "website": "https://museros.ru/"
+   }
+  },
+  {
+   "type": "node",
+   "id": 3514714653,
+   "lat": 59.9293827,
+   "lon": 30.3575184,
+   "tags": {
+    "name": "Музей нонконформистского искусства",
+    "name:en": "Non-Conformist Art Museum",
+    "opening_hours": "We-Fr 16:00-20:00; Sa, Su 12:00-20:00",
+    "phone": "+7 812 7644852",
+    "tourism": "museum",
+    "website": "https://nonmuseum.ru/"
+   }
+  },
+  {
+   "type": "node",
+   "id": 3514768827,
+   "lat": 59.9311605,
+   "lon": 30.3506737,
+   "tags": {
+    "addr:housenumber": "8",
+    "addr:street": "Стремянная улица",
+    "contact:vk": "https://vk.com/theatre_museum",
+    "email": "mussam@theatremuseum.ru",
+    "museum": "person",
+    "name": "Музей-квартира актеров Самойловых",
+    "opening_hours": "We 13:00-21:00; Th-Su 12:00-19:00",
+    "phone": "+78127641130",
+    "tourism": "museum",
+    "website": "https://theatremuseum.ru/filial/memorialnyy_muzey_kvartira_akterov_samoylovyh"
+   }
+  },
+  {
+   "type": "node",
+   "id": 4140882290,
+   "lat": 59.9336033,
+   "lon": 30.36492,
+   "tags": {
+    "artist_name": "HoodGraff",
+    "artwork_type": "graffiti",
+    "description": "#myhoodisgood",
+    "name": "B.B. King",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 4140882291,
+   "lat": 59.9337557,
+   "lon": 30.3577616,
+   "tags": {
+    "artist_name": "HoodGraff",
+    "artwork_type": "graffiti",
+    "description": "#myhoodisgood",
+    "name": "Виктор Цой",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 4349628889,
+   "lat": 59.9299908,
+   "lon": 30.3586875,
+   "tags": {
+    "artist_name": "HoodGraff",
+    "artwork_type": "graffiti",
+    "description": "#myhoodisgood",
+    "name": "Михаил Горшенёв",
+    "name:ru": "Михаил Горшенёв",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 4575935725,
+   "lat": 59.9355237,
+   "lon": 30.3555948,
+   "tags": {
+    "artwork_type": "architecture",
+    "name": "Архитектура",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 4575935727,
+   "lat": 59.9356006,
+   "lon": 30.3559513,
+   "tags": {
+    "name": "Капитель",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 6533612689,
+   "lat": 59.9294913,
+   "lon": 30.3586166,
+   "tags": {
+    "museum": "art",
+    "name": "Арт-центр Пушкинская 10",
+    "name:en": "Art center Pushkinskaya 10",
+    "opening_hours": "We-Fr 16:00-20:00; Sa-Su 12:00-20:00",
+    "phone": "+78127645371",
+    "tourism": "museum",
+    "website": "https://p-10.ru/"
+   }
+  },
+  {
+   "type": "node",
+   "id": 6612920197,
+   "lat": 59.9338114,
+   "lon": 30.3483929,
+   "tags": {
+    "contact:vk": "cats_republic",
+    "name": "Республика Котов",
+    "opening_hours": "Mo-Su 10:00-22:00",
+    "phone": "+7 812 906 53 43;+7 812 579 37 30",
+    "tourism": "museum",
+    "website": "https://catsrepublic.ru"
+   }
+  },
+  {
+   "type": "node",
+   "id": 6627300587,
+   "lat": 59.9323823,
+   "lon": 30.360889,
+   "tags": {
+    "artwork_type": "mural",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 9753855717,
+   "lat": 59.9310233,
+   "lon": 30.3568359,
+   "tags": {
+    "name": "Пётр 1 на коне",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 13092905144,
+   "lat": 59.9293775,
+   "lon": 30.3588452,
+   "tags": {
+    "museum": "art",
+    "name": "Музей «Битлз» Коли Васина",
+    "name:en": "Kolya Vasin's Museum of the Beatles",
+    "name:ru": "Музей «Битлз» Коли Васина",
+    "opening_hours": "We-Fr 14:30-19:00; Sa-Su 12:00-19:00",
+    "start_date": "2019",
+    "tourism": "museum",
+    "website": "https://www.beatlesmuseum.ru/",
+    "wikidata": "Q135933439"
+   }
+  },
+  {
+   "type": "node",
+   "id": 13092952615,
+   "lat": 59.929672,
+   "lon": 30.3588708,
+   "tags": {
+    "addr:floor": "3",
+    "alt_name": "Санкт-Петербургский музей звука",
+    "contact:vk": "https://vk.com/soundmuseumspb",
+    "level": "2",
+    "level:ref": "3",
+    "live_music": "yes",
+    "museum": "art",
+    "name": "Галерея экспериментального звука (ГЭЗ-21)",
+    "short_name": "ГЭЗ-21",
+    "start_date": "1999",
+    "tourism": "museum",
+    "website": "https://soundmuseumspb.ru/",
+    "wikidata": "Q4132372"
+   }
+  },
+  {
+   "type": "node",
+   "id": 13129418655,
+   "lat": 59.9293853,
+   "lon": 30.358984,
+   "tags": {
+    "artwork_type": "mural",
+    "name": "Abbey Road",
+    "name:en": "Abbey Road",
+    "name:ru": "Эбби-роуд",
+    "tourism": "artwork"
+   }
+  },
+  {
+   "type": "node",
+   "id": 13246462716,
+   "lat": 59.9318344,
+   "lon": 30.3489198,
+   "tags": {
+    "check_date": "2025-10-20",
+    "name": "Музей солнечного камня",
+    "tourism": "museum"
+   }
+  },
+  {
+   "type": "node",
+   "id": 13246462717,
+   "lat": 59.9318661,
+   "lon": 30.3489274,
+   "tags": {
+    "check_date": "2025-10-20",
+    "name": "Музей флорариумов",
+    "tourism": "museum"
+   }
+  }
+ ]
+}

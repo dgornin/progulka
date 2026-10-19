@@ -1,0 +1,13 @@
+services:
+  progulka:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - cache:/srv/cache
+    restart: unless-stopped
+
+volumes:
+  cache:
