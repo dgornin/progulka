@@ -5,9 +5,13 @@ its id and URL, so every stop in a plan can be traced back to where it was found
 """
 
 from datetime import date, datetime, time
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
+
+# Models sometimes answer "11:00+03:00"; every time in the app is the city's local time,
+# and comparing an aware time with a naive one raises, so the zone is dropped on input.
+LocalTime = Annotated[time, AfterValidator(lambda t: t.replace(tzinfo=None))]
 
 SourceName = Literal["osm", "wikipedia", "wikivoyage"]
 Pace = Literal["relaxed", "normal", "active"]
@@ -25,8 +29,8 @@ class TripBrief(BaseModel):
     country: str | None = None
     language: Literal["ru", "en"] = "ru"
     date: date
-    start_time: time
-    end_time: time
+    start_time: LocalTime
+    end_time: LocalTime
     start_point: str | None = Field(None, description="Address or landmark, free text")
     interests: list[Interest] = Field(default_factory=list)
     avoid: list[str] = Field(default_factory=list, description="Things to skip: 'museums'")

@@ -6,13 +6,11 @@ route itself. Code then re-runs research (only when research_goal is set), the
 optimizer and the validator, so a re-plan obeys the same checks as the first plan.
 """
 
-from datetime import time
-
 from pydantic import BaseModel, Field
 
 from app.agent.prompts import REPLANNER
 from app.llm import LLM
-from app.models import Interest, Plan
+from app.models import Interest, LocalTime, Plan
 
 
 class PlanEdit(BaseModel):
@@ -26,9 +24,11 @@ class PlanEdit(BaseModel):
         default_factory=list, description="Interest labels as listed in the brief"
     )
     add_avoid: list[str] = Field(default_factory=list)
-    start_time: time | None = Field(None, description="New start, HH:MM; null = unchanged")
-    end_time: time | None = Field(None, description="New end, HH:MM; null = unchanged")
-    prefer_indoor: bool = False
+    start_time: LocalTime | None = Field(None, description="New start, HH:MM; null = unchanged")
+    end_time: LocalTime | None = Field(None, description="New end, HH:MM; null = unchanged")
+    rain_from: LocalTime | None = Field(
+        None, description="The traveller expects rain from this time, HH:MM; null = no rain"
+    )
     research_goal: str | None = Field(
         None, description="What the research agent must find; null when no new places are needed"
     )

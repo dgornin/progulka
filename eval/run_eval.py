@@ -12,14 +12,15 @@ Then both are checked by the same code:
 - walk km: street-distance estimate along the planned order.
 
 Usage (from the repo root, needs .env):
-    python -m eval.run_eval                  # all queries
-    python -m eval.run_eval --only kazan-history --skip-baseline
-Writes eval/results.json and eval/results.md.
+    python -m eval.run_eval                  # all queries, MODEL_NAME from .env
+    python -m eval.run_eval --model openai/gpt-6-luna --only kazan-history,spb-constructivism
+Writes eval/results/<model>.json and eval/results/<model>.md.
 """
 
 import argparse
 import asyncio
 import json
+import re
 import time as clock
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
@@ -31,7 +32,7 @@ from app.config import settings
 from app.llm import LLM
 from app.models import AgentEvent, GeoPoint, TripBrief
 from app.pipeline import PlanRequest, plan_trip
-from app.planning.geo import street_meters, walk_minutes
+from app.planning.geo import haversine_m, street_meters, walk_minutes
 from app.planning.hours import is_open
 from app.sources import geocode
 from app.sources.http import SourceError, http
@@ -39,6 +40,9 @@ from app.sources.http import SourceError, http
 HERE = Path(__file__).parent
 TODAY = date(2026, 10, 20)  # the queries name concrete dates; this anchors "today"
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
+# A match this far from the walk's start is a namesake elsewhere in the region, not the
+# place the model meant; counting it would inflate the baseline's walking distance.
+MAX_FROM_START_M = 10_000
 
 
 class BaselineStop(BaseModel):
@@ -147,7 +151,7 @@ async def run_baseline(
     city = await geocode.locate_city(brief.city, brief.country)
     points = []
     for stop in answer.stops:
-        lat, lon, hours = await _locate(stop, brief.city, city.bbox if city else None)
+        lat, lon, hours = await _locate(stop, brief.city, city.bbox if city else None, start)
         points.append(
             Point(stop.name, lat, lon, hours, _at(brief, stop.arrive), _at(brief, stop.depart))
         )
@@ -156,21 +160,37 @@ async def run_baseline(
 
 
 async def _locate(
-    stop: BaselineStop, city: str, bbox
+    stop: BaselineStop, city: str, bbox, start: GeoPoint
 ) -> tuple[float | None, float | None, str | None]:
-    """Find the place by name in OpenStreetMap (Nominatim), inside the city's bounding box."""
-    params = {"q": f"{stop.name}, {city}", "format": "jsonv2", "limit": 1, "extratags": 1}
-    if bbox:
-        south, west, north, east = bbox
-        params.update(viewbox=f"{west},{north},{east},{south}", bounded=1)
-    try:
-        found = await http.get_json(NOMINATIM, params)
-    except SourceError:
-        return None, None, None
-    if not found:
-        return None, None, None
-    hit = found[0]
-    return float(hit["lat"]), float(hit["lon"]), (hit.get("extratags") or {}).get("opening_hours")
+    """Find the place in OpenStreetMap (Nominatim) inside the city's bounding box.
+
+    Deliberately lenient, so the comparison does not favour the agent: the name as
+    written, the name without quotes and parenthesised remarks, then the address the
+    model gave. The first hit inside the city and within 10 km of the start counts.
+    """
+    queries = [stop.name, _plain_name(stop.name), stop.address]
+    for query in dict.fromkeys(q for q in queries if q):
+        params = {"q": f"{query}, {city}", "format": "jsonv2", "limit": 1, "extratags": 1}
+        if bbox:
+            south, west, north, east = bbox
+            params.update(viewbox=f"{west},{north},{east},{south}", bounded=1)
+        try:
+            found = await http.get_json(NOMINATIM, params)
+        except SourceError:
+            continue
+        if found:
+            hit = found[0]
+            lat, lon = float(hit["lat"]), float(hit["lon"])
+            if haversine_m(start.lat, start.lon, lat, lon) <= MAX_FROM_START_M:
+                return lat, lon, (hit.get("extratags") or {}).get("opening_hours")
+    return None, None, None
+
+
+def _plain_name(name: str) -> str:
+    """'Дом-коммуна («Слеза социализма»)' -> 'Дом-коммуна'; 'Кул-Шариф — мечеть' -> 'Кул-Шариф'."""
+    name = re.sub(r"\(.*?\)", "", name)
+    name = re.split(r"\s[—–-]\s|:", name)[0]
+    return name.replace("«", "").replace("»", "").replace('"', "").strip()
 
 
 def _at(brief: TripBrief, hhmm: str) -> datetime:
@@ -209,14 +229,18 @@ def to_markdown(rows: list[dict]) -> str:
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--only", help="run one query id")
+    parser.add_argument("--only", help="comma-separated query ids")
+    parser.add_argument("--model", help="override MODEL_NAME")
     parser.add_argument("--skip-baseline", action="store_true")
     args = parser.parse_args()
 
     queries = json.loads((HERE / "queries.json").read_text())
     if args.only:
-        queries = [q for q in queries if q["id"] == args.only]
+        wanted = set(args.only.split(","))
+        queries = [q for q in queries if q["id"] in wanted]
     base = LLM.from_settings(settings)
+    if args.model:
+        base.model = args.model
     rows = []
     for q in queries:
         row: dict = {"id": q["id"], "model": base.model}
@@ -231,9 +255,12 @@ async def main() -> None:
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False))
 
-    (HERE / "results.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2))
-    (HERE / "results.md").write_text(
-        f"Model: `{base.model}`, run on {TODAY.isoformat()}.\n\n" + to_markdown(rows)
+    out = HERE / "results"
+    out.mkdir(exist_ok=True)
+    slug = base.model.replace("/", "__").replace(":", "_")
+    (out / f"{slug}.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2))
+    (out / f"{slug}.md").write_text(
+        f"Model: `{base.model}`, queries anchored at {TODAY.isoformat()}.\n\n" + to_markdown(rows)
     )
 
 

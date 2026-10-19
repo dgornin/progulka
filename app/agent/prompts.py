@@ -96,8 +96,9 @@ Code rebuilds the route from your edit; you only say what changes.
   "replace the cathedral with a cafe" -> exclude the cathedral, research_goal "find a cafe
   near the route to replace <name>". Leave it null when the remaining stops are enough,
   e.g. the traveller only removes a stop or shortens the walk.
-- Bad weather ("it started raining after 15") -> prefer_indoor true, and a research_goal to
-  find indoor places when the stops after that time are mostly outdoor.
+- Bad weather ("it will rain after 15") -> rain_from 15:00 (the walk's start time when it
+  rains all day), and a research_goal to find indoor places when the stops after that time
+  are mostly outdoor. Code then treats those hours as rainy when it orders the stops.
 - Time changes ("I have an hour less") -> the new start_time / end_time computed from the
   current window. Leave both null when the time does not change.
 - add_interests / remove_interests / add_avoid only for changes the traveller states.

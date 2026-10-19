@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.prompts import BRIEF
 from app.llm import LLM
-from app.models import Interest, Pace, TripBrief
+from app.models import Interest, LocalTime, Pace, TripBrief
 
 DEFAULT_START = dt.time(10, 0)
 DEFAULT_HOURS = 5.0
@@ -30,8 +30,8 @@ class BriefDraft(BaseModel):
     country: str | None = None
     language: Literal["ru", "en"] | None = None
     date: dt.date | None = Field(None, description="YYYY-MM-DD, relative dates resolved")
-    start_time: dt.time | None = Field(None, description="HH:MM")
-    end_time: dt.time | None = Field(None, description="HH:MM")
+    start_time: LocalTime | None = Field(None, description="HH:MM")
+    end_time: LocalTime | None = Field(None, description="HH:MM")
     duration_hours: float | None = Field(
         None, gt=0, le=14, description="Only when a length is given instead of an end time"
     )
@@ -52,8 +52,8 @@ class BriefOverrides(BaseModel):
 
     city: str | None = None
     date: dt.date | None = None
-    start_time: dt.time | None = None
-    end_time: dt.time | None = None
+    start_time: LocalTime | None = None
+    end_time: LocalTime | None = None
     start_point: str | None = None
     language: Literal["ru", "en"] | None = None
 

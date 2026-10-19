@@ -77,6 +77,7 @@ const state = {
   run: null, // bookkeeping of the stream being rendered, see beginRun()
   placeNames: new Map(), // place_id -> name, to name the places that did not fit
   markers: new Map(), // place_id -> Leaflet marker
+  candidates: new Map(), // place_id -> live marker of a shortlisted place (see map section)
   cards: new Map(), // place_id -> timeline item
 };
 
@@ -269,6 +270,7 @@ function beginRun(kind, title) {
     state.placeNames.clear();
     ui.feedback.hidden = true;
     clearRoute();
+    clearCandidates();
     showEmpty(
       "Агент работает",
       "Следите за ним слева: он ищет места, отбирает подходящие, а затем расписание и проверка соберут маршрут.",
@@ -364,6 +366,7 @@ function onStage({ name, status, label, detail }) {
 function showStageDetail(name, detail) {
   if (!detail) return;
   if (name === "brief") renderBrief(detail);
+  if (name === "weather" && detail.start) showStart(detail.start);
   if (name === "research") {
     const candidates = detail.candidates ?? 0;
     addRow(
@@ -456,9 +459,11 @@ function onToolResult({ id, name, summary, count, error }) {
   follow();
 }
 
-function onCandidate({ action, place_id: id, name, score, interests = [], reason }) {
+function onCandidate({ action, place_id: id, name, kind, lat, lon, score, interests = [], reason }) {
   state.placeNames.set(id, name);
   const added = action === "add";
+  if (added && typeof lat === "number") showCandidate(id, name, kind, lat, lon);
+  if (!added) hideCandidate(id);
   addRow(
     `candidate ${added ? "is-add" : "is-remove"}`,
     badge(added ? "+" : "−", "", added ? "В шорт-лист" : "Из шорт-листа"),
@@ -526,6 +531,11 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">участники OpenStreetMap</a>',
 }).addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
+// Places appear here the moment the agent shortlists them, so the audience watches the
+// route's raw material gather; after the plan, the ones that did not fit stay as ghosts.
+const candidateLayer = L.layerGroup().addTo(map);
+let startMarker = null;
+let fitTimer = null;
 new ResizeObserver(() => map.invalidateSize()).observe($("#map"));
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -570,8 +580,64 @@ function clearRoute() {
   state.markers.clear();
 }
 
+function clearCandidates() {
+  candidateLayer.clearLayers();
+  state.candidates.clear();
+  startMarker = null;
+}
+
+/** As soon as the city is geocoded: fly there and mark the start. */
+function showStart({ lat, lon, label }) {
+  startMarker?.remove();
+  startMarker = L.marker([lat, lon], { icon: pinIcon("start", "", 0), title: label ?? "Старт" })
+    .bindTooltip(label ?? "Старт", { direction: "top", offset: [0, -14] })
+    .addTo(candidateLayer);
+  map.flyTo([lat, lon], 15, { animate: !reduceMotion, duration: 1.2 });
+}
+
+function showCandidate(id, name, kind, lat, lon) {
+  hideCandidate(id);
+  const icon = L.divIcon({ className: "pin pin-cand", html: "<span></span>", iconSize: [16, 16], iconAnchor: [8, 8] });
+  const marker = L.marker([lat, lon], { icon, title: name, keyboard: false })
+    .bindTooltip(`${name} · ${kindLabel(kind)}`, { direction: "top", offset: [0, -8] })
+    .addTo(candidateLayer);
+  state.candidates.set(id, marker);
+  // Batch the re-framing: a turn can shortlist ten places at once.
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(fitCandidates, 350);
+}
+
+function hideCandidate(id) {
+  state.candidates.get(id)?.remove();
+  state.candidates.delete(id);
+}
+
+function fitCandidates() {
+  const points = [...state.candidates.values()].map((m) => m.getLatLng());
+  if (startMarker) points.push(startMarker.getLatLng());
+  if (points.length < 2) return;
+  map.flyToBounds(L.latLngBounds(points), { padding: [48, 48], maxZoom: 16, duration: reduceMotion ? 0 : 0.8 });
+}
+
+/** After a plan: stops get their numbered pins, the rest of the shortlist fades to ghosts. */
+function settleCandidates(plan) {
+  clearTimeout(fitTimer);
+  startMarker?.remove();
+  startMarker = null;
+  const inPlan = new Set(plan.stops.map((stop) => stop.place.id));
+  for (const [id, marker] of state.candidates) {
+    if (inPlan.has(id)) {
+      hideCandidate(id);
+    } else {
+      marker.getElement()?.classList.add("is-dropped");
+      marker.setTooltipContent(`${state.placeNames.get(id) ?? "Место"} — не вошло в маршрут`);
+    }
+  }
+}
+
 function renderRoute(plan) {
   clearRoute();
+  settleCandidates(plan);
   const start = [plan.start.lat, plan.start.lon];
   const stopPoints = plan.stops.map((stop) => [stop.place.lat, stop.place.lon]);
   // Without walking geometry the stops are joined by straight dotted lines, so the map

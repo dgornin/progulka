@@ -17,7 +17,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -29,7 +29,15 @@ from app.agent.tools import ResearchState
 from app.agent.writer import write_texts
 from app.config import settings
 from app.llm import LLM
-from app.models import AgentEvent, Candidate, GeoPoint, HourWeather, Interest, Plan
+from app.models import (
+    AgentEvent,
+    Candidate,
+    GeoPoint,
+    HourWeather,
+    Interest,
+    Plan,
+    TripBrief,
+)
 from app.planning.optimizer import optimize, schedule
 from app.planning.routing import walking_route
 from app.planning.validator import has_errors, validate
@@ -107,7 +115,13 @@ async def plan_trip(req: PlanRequest, llm: LLM, emit: Emit, today: date) -> Sess
     except SourceError:
         hours = []
     summary = weather.summarize(hours, brief.start_time, brief.end_time, brief.language)
-    await stage(emit, "weather", "done", f"Погода: {summary}", {"summary": summary})
+    await stage(
+        emit,
+        "weather",
+        "done",
+        f"Погода: {summary}",
+        {"summary": summary, "start": start.model_dump()},
+    )
 
     state = ResearchState(
         brief=brief,
@@ -132,19 +146,9 @@ async def apply_feedback(
     if req.feedback.strip():
         edit = await interpret_feedback(llm, session.plan, req.feedback)
     else:
-        edit = PlanEdit(
-            exclude_place_ids=[],
-            add_interests=[],
-            remove_interests=[],
-            add_avoid=[],
-            start_time=None,
-            end_time=None,
-            prefer_indoor=False,
-            research_goal=None,
-            reply="Убираю выбранные места и перестраиваю маршрут.",
-        )
+        edit = PlanEdit(reply="Убираю выбранные места и перестраиваю маршрут.")
     excluded = set(edit.exclude_place_ids) | set(req.exclude_place_ids)
-    _apply_edit(session.state, edit, excluded)
+    _apply_edit(session, edit, excluded)
     await stage(emit, "feedback", "done", edit.reply, edit.model_dump(mode="json"))
 
     goal = edit.research_goal
@@ -271,7 +275,8 @@ async def _build(session: Session, emit: Emit) -> Plan:
     return plan
 
 
-def _apply_edit(state: ResearchState, edit: PlanEdit, excluded: set[str]) -> None:
+def _apply_edit(session: Session, edit: PlanEdit, excluded: set[str]) -> None:
+    state = session.state
     state.excluded |= excluded
     for pid in excluded:
         state.shortlist.pop(pid, None)
@@ -291,9 +296,22 @@ def _apply_edit(state: ResearchState, edit: PlanEdit, excluded: set[str]) -> Non
     if edit.end_time:
         update["end_time"] = edit.end_time
     state.brief = brief.model_copy(update=update)
-    if edit.prefer_indoor:
-        for pid in [pid for pid, c in state.shortlist.items() if c.place.indoor is False]:
-            state.shortlist.pop(pid)
+    if edit.rain_from:
+        # The traveller's own forecast wins: mark those hours rainy, and the optimizer
+        # and validator treat outdoor stops in them exactly as they treat forecast rain.
+        session.weather = _with_rain(session.weather, state.brief, edit.rain_from)
+        state.weather_summary += f"; путешественник ждёт дождь с {edit.rain_from:%H:%M}"
+
+
+def _with_rain(hours: list[HourWeather], brief: TripBrief, rain_from: time) -> list[HourWeather]:
+    by_time = {h.time: h for h in hours}
+    t = datetime.combine(brief.date, rain_from.replace(minute=0))
+    end = datetime.combine(brief.date, brief.end_time)
+    while t < end:
+        hour = by_time.get(t) or HourWeather(time=t)
+        by_time[t] = hour.model_copy(update={"precipitation_probability": 100})
+        t += timedelta(hours=1)
+    return sorted(by_time.values(), key=lambda h: h.time)
 
 
 def _remember(session: Session) -> None:
