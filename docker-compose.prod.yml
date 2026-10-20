@@ -5,12 +5,15 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      COOKIE_SECURE: "1"  # the site is HTTPS-only: the session cookie never goes over HTTP
     # Behind Caddy: take the visitor's address from X-Forwarded-For for the rate limit.
     # Only Caddy can reach this port (it is not published), so trusting it is safe.
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000",
               "--proxy-headers", "--forwarded-allow-ips", "*"]
     volumes:
       - ./.cache:/srv/cache
+      - ./data:/srv/data  # the database: back up this directory
     restart: unless-stopped
 
   caddy:

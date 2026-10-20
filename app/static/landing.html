@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Прогулка — пеший маршрут из реальных мест под ваши интересы</title>
+  <meta name="description" content="Опишите день словами — LLM-агент найдёт реальные места в OpenStreetMap, Википедии и Wikivoyage, проверит часы работы и погоду и разложит прогулку по времени.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23c8412a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400..700&family=JetBrains+Mono:wght@400;500;600&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/landing.css">
+  <script type="module" src="/static/js/landing.js"></script>
+</head>
+<body class="landing">
+  <header class="site-header">
+    <div class="container site-header-inner">
+      <a class="brand" href="/" aria-label="Прогулка — на главную">
+        <svg class="logo" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M7 35 C 13 18, 26 32, 30 17 S 36 8, 37 8" fill="none" stroke="currentColor"
+                stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 5.5"/>
+          <circle class="logo-start" cx="7" cy="35" r="4.5"/>
+          <circle cx="19" cy="25.5" r="3.5" fill="currentColor"/>
+          <circle cx="37" cy="8" r="4.5" fill="currentColor"/>
+        </svg>
+        <span class="brand-name">Прогулка</span>
+      </a>
+      <nav class="site-nav" aria-label="Разделы страницы">
+        <a href="#how">Как это работает</a>
+        <a href="#why">Почему агент</a>
+        <a href="#you">Под вас</a>
+        <a href="#team">Команда</a>
+      </nav>
+      <div class="site-actions">
+        <a class="btn btn-ghost" href="/login" data-guest>Войти</a>
+        <a class="btn btn-primary" href="/register" data-guest>Начать</a>
+        <a class="btn btn-primary" href="/app/trips" data-user hidden>Мои прогулки</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">LLM-агент для пеших прогулок</p>
+          <h1 class="display">Опишите день словами — получите <em>прогулку</em> из настоящих мест</h1>
+          <p class="lead">Агент сам ищет места в OpenStreetMap, Википедии и Wikivoyage, проверяет часы работы,
+            погоду и пешие переходы и раскладывает день по времени. Что-то не так — поправьте словами.</p>
+          <div class="hero-cta">
+            <a class="btn btn-primary btn-lg" href="/register" data-guest>Начать</a>
+            <a class="btn btn-lg" href="/login?demo=1" data-guest data-demo>Попробовать демо</a>
+            <a class="btn btn-primary btn-lg" href="/app/trips" data-user hidden>Мои прогулки</a>
+            <a class="btn btn-lg" href="/app/new" data-user hidden>Новая прогулка</a>
+          </div>
+          <p class="hero-note" data-guest>Уже есть аккаунт? <a href="/login">Войти</a></p>
+          <p class="hero-note" data-user hidden>Вы вошли как <b id="user-name"></b></p>
+          <p class="hero-sources"><span>Данные</span> OpenStreetMap · Википедия · Wikivoyage · Open-Meteo</p>
+        </div>
+
+        <figure class="hero-preview">
+          <div class="preview-map">
+            <img src="/static/img/route-example.jpg" width="1520" height="1280"
+                 alt="Карта центра Петербурга: маршрут из 12 остановок от Московского вокзала до Кузнечного рынка">
+            <span class="preview-credit">© OpenFreeMap · © участники OpenStreetMap</span>
+          </div>
+          <blockquote class="preview-request">
+            <p class="preview-label">Запрос</p>
+            <p>«Суббота в Петербурге, с 11 до 18. Люблю конструктивизм и стрит-арт, хочу уличную еду,
+              музеи не надо. Старт от Московского вокзала»</p>
+          </blockquote>
+          <figcaption class="preview-plan">
+            <p class="eyebrow">Санкт-Петербург · сб · 11:00–18:00</p>
+            <p class="preview-title">Стрит-арт и конструктивизм от вокзала до Кузнечного</p>
+            <dl class="preview-stats">
+              <div><dt>остановок</dt><dd>12</dd></div>
+              <div><dt>км пешком</dt><dd>9,1</dd></div>
+              <div><dt>вся прогулка</dt><dd>5 ч 47 мин</dd></div>
+            </dl>
+            <ol class="preview-stops">
+              <li><span class="stop-n">1</span><span>Мурал «Туристы»</span><span class="src src-osm" title="OpenStreetMap">OSM</span></li>
+              <li><span class="stop-n">9</span><span>Блокадная подстанция, 1932</span><span class="src src-wikipedia" title="Википедия">W</span></li>
+              <li><span class="stop-n">10</span><span>Пышечная на Большой Конюшенной</span><span class="src src-wikivoyage" title="Wikivoyage">WV</span></li>
+            </ol>
+            <p class="preview-more">и ещё 9 — у каждой есть источник</p>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" id="how" aria-labelledby="how-title">
+      <div class="container">
+        <header class="section-head">
+          <p class="eyebrow">Как это работает</p>
+          <h2 class="title" id="how-title">Пять остановок от идеи до маршрута</h2>
+        </header>
+        <ol class="walk">
+          <li class="walk-stop">
+            <span class="walk-num" aria-hidden="true">1</span>
+            <div class="walk-text">
+              <h3>Опишите прогулку</h3>
+              <p>Как другу: город, время, что любите и чего не надо. Или отметьте интересы и попросите
+                «больше природы, меньше музеев».</p>
+              <p class="walk-meta">текст → структурированный запрос</p>
+            </div>
+          </li>
+          <li class="walk-stop">
+            <span class="walk-num" aria-hidden="true">2</span>
+            <div class="walk-text">
+              <h3>Агент ищет реальные места</h3>
+              <p>Он сам решает, где искать каждый интерес: стрит-арт — в OpenStreetMap, конструктивизм — в Википедии,
+                еду — в Wikivoyage. Каждый его шаг видно на экране.</p>
+              <p class="walk-meta">ReAct-агент · 7 инструментов</p>
+            </div>
+          </li>
+          <li class="walk-stop">
+            <span class="walk-num" aria-hidden="true">3</span>
+            <div class="walk-text">
+              <h3>Код собирает расписание</h3>
+              <p>Оптимизатор укладывает остановки во время с учётом часов работы, дождя и пеших переходов,
+                а валидатор проверяет, что всё сходится.</p>
+              <p class="walk-meta">без LLM: арифметика времени</p>
+            </div>
+          </li>
+          <li class="walk-stop">
+            <span class="walk-num" aria-hidden="true">4</span>
+            <div class="walk-text">
+              <h3>Правьте словами</h3>
+              <p>«После 15 обещают дождь», «убери второй собор», «добавь кофейню» — агент перестроит
+                только то, что нужно.</p>
+              <p class="walk-meta">правка → изменение плана</p>
+            </div>
+          </li>
+          <li class="walk-stop">
+            <span class="walk-num" aria-hidden="true">5</span>
+            <div class="walk-text">
+              <h3>Он вас запоминает</h3>
+              <p>Анкета интересов и то, что агент понял из ваших правок, переходят из прогулки в прогулку.</p>
+              <p class="walk-meta">профиль + долгая память</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section why" id="why" aria-labelledby="why-title">
+      <div class="container why-grid">
+        <div class="why-copy">
+          <p class="eyebrow">Почему не просто чат-бот</p>
+          <h2 class="title" id="why-title">Чат-бот пишет правдоподобно. Агент — проверяемо.</h2>
+          <p class="lead">Мы попросили ту же модель составить маршрут одним промптом и проверили оба варианта
+            одним кодом: существуют ли места, открыты ли они в момент визита и успевает ли человек дойти.</p>
+          <p class="muted">8 запросов в 7 городах, одна и та же модель. У одного промпта время между остановками
+            часто меньше, чем занимает дорога: такой маршрут нельзя пройти.</p>
+        </div>
+        <div class="score-wrap">
+          <table class="score">
+            <caption class="sr-only">Агент против одного промпта на 8 маршрутах</caption>
+            <thead>
+              <tr><th scope="col"><span class="sr-only">Метрика</span></th><th scope="col" class="is-agent">Агент</th><th scope="col">Один промпт</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Закрыто в момент визита</th>
+                <td class="is-agent">0</td><td>4</td>
+              </tr>
+              <tr>
+                <th scope="row">Невозможные переходы<small>времени меньше, чем идти</small></th>
+                <td class="is-agent">0</td><td>25</td>
+              </tr>
+              <tr>
+                <th scope="row">Пешком в среднем</th>
+                <td class="is-agent">5,3<span class="unit">км</span><span class="km-bar" style="--km: 5.3"></span></td>
+                <td>19<span class="unit">км</span><span class="km-bar" style="--km: 19"></span></td>
+              </tr>
+              <tr>
+                <th scope="row">Места нашлись в источниках</th>
+                <td class="is-agent">77<span class="unit">из 77</span></td><td>48<span class="unit">из 68</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="score-note">Полные таблицы и код проверки — в репозитории, <code>eval/</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="you" aria-labelledby="you-title">
+      <div class="container">
+        <header class="section-head">
+          <p class="eyebrow">Под вас</p>
+          <h2 class="title" id="you-title">Маршрут, который знает, что вы любите</h2>
+        </header>
+        <div class="feature-grid">
+          <article class="feature">
+            <h3>Анкета за минуту</h3>
+            <p>Пятнадцать тем — от парков и набережных до баров и стрит-арта. Отметьте «интересно» или «очень»,
+              а что не нравится — «не предлагать».</p>
+            <div class="demo-chips" aria-hidden="true">
+              <span data-level="strong">Стрит-арт</span>
+              <span data-level="plain">Архитектура</span>
+              <span data-level="strong">Кофейни и выпечка</span>
+              <span>Природа и парки</span>
+              <span data-level="plain">Виды и панорамы</span>
+              <span data-level="avoid">Музеи и галереи</span>
+            </div>
+          </article>
+          <article class="feature">
+            <h3>Настройка каждой прогулки</h3>
+            <p>Сегодня хочется больше зелени и меньше музеев, спокойный темп и не дальше шести километров —
+              это пара нажатий перед стартом.</p>
+            <div class="demo-chips" aria-hidden="true">
+              <span data-level="more">больше: природа</span>
+              <span data-level="more">больше: набережные</span>
+              <span data-level="less">меньше: музеи</span>
+              <span>темп: спокойно</span>
+              <span>до 6 км</span>
+            </div>
+          </article>
+          <article class="feature">
+            <h3>Память между прогулками</h3>
+            <p>Агент замечает в ваших словах «не люблю очереди» или «хожу быстро» и помнит это дальше.
+              Что он запомнил, видно в профиле, и любой факт можно удалить.</p>
+            <ul class="demo-memory" aria-hidden="true">
+              <li>Не любит долгие очереди в музеи</li>
+              <li>Ходит быстро, 25 минут пешком — нормально</li>
+            </ul>
+          </article>
+          <article class="feature">
+            <h3>Все прогулки в кабинете</h3>
+            <p>Маршруты сохраняются вместе с историей правок: можно вернуться к прошлому и продолжить
+              его менять или начать новый.</p>
+            <ul class="demo-trips" aria-hidden="true">
+              <li><b>Стрит-арт и конструктивизм</b><span>Петербург · 12 остановок</span></li>
+              <li><b>Казань на закате</b><span>Казань · 8 остановок</span></li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section cta" aria-labelledby="cta-title">
+      <div class="container">
+        <div class="cta-box">
+          <div>
+            <h2 class="title" id="cta-title">Попробуйте за минуту</h2>
+            <p class="lead">Демо-аккаунт с заполненным профилем — без регистрации и анкеты.</p>
+          </div>
+          <div class="cta-actions">
+            <a class="btn btn-primary btn-lg" href="/login?demo=1" data-guest data-demo>Войти в демо</a>
+            <a class="btn btn-lg" href="/register" data-guest>Создать аккаунт</a>
+            <a class="btn btn-primary btn-lg" href="/app/new" data-user hidden>Новая прогулка</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer" id="team">
+    <div class="container footer-grid">
+      <div class="footer-about">
+        <p class="brand-name">Прогулка</p>
+        <p>Проект курса «LLM Agents», НИУ ВШЭ, 2026.</p>
+        <a class="btn btn-sm" href="https://github.com/dgornin/progulka" target="_blank" rel="noopener noreferrer">Код на GitHub ↗</a>
+      </div>
+      <div>
+        <h2 class="footer-title">Команда</h2>
+        <ul class="footer-list">
+          <li>Роман Бекетов <a href="https://github.com/rbeketov" target="_blank" rel="noopener noreferrer">@rbeketov</a></li>
+          <li>Ярослав Кузьмин <a href="https://github.com/yarikTri" target="_blank" rel="noopener noreferrer">@yarikTri</a></li>
+          <li>Даниил Горнин <a href="https://github.com/dgornin" target="_blank" rel="noopener noreferrer">@dgornin</a></li>
+          <li>Иван Прыгунов <a href="https://github.com/juzu400" target="_blank" rel="noopener noreferrer">@juzu400</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="footer-title">Данные</h2>
+        <ul class="footer-list">
+          <li>Места — <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>, Википедия, Wikivoyage</li>
+          <li>Погода — Open-Meteo</li>
+          <li>Карты — <a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer">OpenFreeMap</a></li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

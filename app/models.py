@@ -9,6 +9,7 @@ from datetime import date, datetime, time
 from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 # Models sometimes answer "11:00+03:00"; every time in the app is the city's local time,
 # and comparing an aware time with a naive one raises, so the zone is dropped on input.
@@ -16,6 +17,9 @@ LocalTime = Annotated[time, AfterValidator(lambda t: t.replace(tzinfo=None))]
 
 SourceName = Literal["osm", "wikipedia", "wikivoyage"]
 Pace = Literal["relaxed", "normal", "active"]
+# Where an interest came from: the request text, the planner's "больше" panel, or the
+# profile (app/personalization.py merges them); the UI shows it next to the interest.
+InterestSource = Literal["request", "walk", "profile"]
 
 
 # Interests weighted at least this (a plain or a strong wish on the BRIEF prompt's
@@ -29,6 +33,9 @@ class Interest(BaseModel):
     weight: float = Field(
         1.0, ge=0, le=1, description="1.0 strong wish, 0.7 plain wish, 0.4 optional"
     )
+    # Set by code, never by a model: hidden from the JSON Schema that the brief and the
+    # replanner send to the LLM, so the model cannot claim an interest came from the profile.
+    source: SkipJsonSchema[InterestSource] = "request"
 
 
 class TripBrief(BaseModel):
@@ -134,7 +141,16 @@ class Plan(BaseModel):
 
 
 EventType = Literal[
-    "stage", "thought", "tool_call", "tool_result", "candidate", "warning", "plan", "error", "done"
+    "stage",
+    "thought",
+    "tool_call",
+    "tool_result",
+    "candidate",
+    "warning",
+    "memory",
+    "plan",
+    "error",
+    "done",
 ]
 
 

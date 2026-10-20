@@ -10,6 +10,7 @@ research reason.
 
 import asyncio
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -39,7 +40,9 @@ class PlanTexts(BaseModel):
     stops: list[StopText]
 
 
-async def write_texts(llm: LLM, plan: Plan) -> Plan:
+async def write_texts(llm: LLM, plan: Plan, traveller_facts: Sequence[str] = ()) -> Plan:
+    """`traveller_facts`: long-term memory and profile notes, so the texts can speak to
+    the traveller's known tastes; the prompt forbids using them as facts about places."""
     if not plan.stops:
         return plan
     payload = {
@@ -48,6 +51,7 @@ async def write_texts(llm: LLM, plan: Plan) -> Plan:
             "interests": [i.label for i in plan.brief.interests],
             "with_kids": plan.brief.with_kids,
             "notes": plan.brief.notes,
+            "known": list(traveller_facts),
         },
         "city": plan.brief.city,
         "stops": [_stop_input(stop) for stop in plan.stops],

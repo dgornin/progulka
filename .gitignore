@@ -12,3 +12,7 @@ __pycache__/
 
 # Runtime caches (HTTP responses, LLM replay)
 .cache/
+
+# The SQLite database: .data locally, data next to the compose files on a server
+/.data/
+/data/

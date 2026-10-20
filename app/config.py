@@ -11,7 +11,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+REPO = Path(__file__).resolve().parents[1]
+load_dotenv(REPO / ".env")
 
 
 def _env(name: str, default: str) -> str:
@@ -42,9 +43,19 @@ class Settings:
     rate_limit_per_hour: int
     daily_budget_usd: float
     max_concurrent_runs: int
+    # SQLite file in DATA_DIR (a mounted volume in Docker) unless DATABASE_URL is set.
+    database_url: str
+    cookie_secure: bool  # behind HTTPS: the session cookie is never sent over plain HTTP
+    # Accounts created (or whose password is reset to these values) at startup, so an
+    # operator rotates them by editing .env. Empty = no such account.
+    demo_email: str
+    demo_password: str
+    admin_email: str
+    admin_password: str
 
 
 def load_settings() -> Settings:
+    data_dir = Path(_env("DATA_DIR", str(REPO / ".data")))
     return Settings(
         api_key=_env("API_KEY", ""),
         base_url=_env("BASE_URL", "https://openrouter.ai/api/v1"),
@@ -53,7 +64,7 @@ def load_settings() -> Settings:
         reasoning=_env("LLM_REASONING", "off"),
         agent_max_steps=int(_env("AGENT_MAX_STEPS", "14")),
         user_agent=_env("HTTP_USER_AGENT", "progulka/0.1 (+https://github.com/dgornin/progulka)"),
-        cache_dir=Path(_env("CACHE_DIR", str(Path(__file__).resolve().parents[1] / ".cache"))),
+        cache_dir=Path(_env("CACHE_DIR", str(REPO / ".cache"))),
         overpass_urls=tuple(
             url.strip()
             for url in _env(
@@ -69,6 +80,12 @@ def load_settings() -> Settings:
         rate_limit_per_hour=int(_env("RATE_LIMIT_PER_HOUR", "0")),
         daily_budget_usd=float(_env("DAILY_BUDGET_USD", "0")),
         max_concurrent_runs=int(_env("MAX_CONCURRENT_RUNS", "0")),
+        database_url=_env("DATABASE_URL", f"sqlite+aiosqlite:///{data_dir / 'progulka.db'}"),
+        cookie_secure=_env("COOKIE_SECURE", "0") == "1",
+        demo_email=_env("DEMO_EMAIL", ""),
+        demo_password=_env("DEMO_PASSWORD", ""),
+        admin_email=_env("ADMIN_EMAIL", ""),
+        admin_password=_env("ADMIN_PASSWORD", ""),
     )
 
 

@@ -14,20 +14,28 @@ round listens to.
 Feedback re-enters at research (when new places are needed) or at optimize, and
 every route, first or rebuilt, goes through the same validation and repair round.
 A feedback run that fails or is cancelled leaves the session as it was.
+
+Personal context: the planner panel, the request, the profile and later the feedback
+are merged into the brief by code (app/personalization.py); long-term memory and the
+profile's notes reach the research agent and the writer as data; after a successful
+run the traveller's own words are mined for new durable facts (app/agent/memory.py),
+which the pipeline returns in Session.learned for the caller to store. The pipeline
+keeps nothing between runs: the caller persists sessions, so a trip survives a restart.
 """
 
 import asyncio
 import copy
 import datetime as dt
 import uuid
-from collections import OrderedDict
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agent.brief import parse_brief
+from app.agent.memory import extract_memory
 from app.agent.prompts import REPAIR_GOAL, REPLACE_GOAL
 from app.agent.replanner import PlanEdit, interpret_feedback
 from app.agent.researcher import research
@@ -41,18 +49,25 @@ from app.models import (
     Emit,
     GeoPoint,
     HourWeather,
-    Interest,
     Plan,
     TripBrief,
+)
+from app.personalization import (
+    brief_defaults,
+    brief_overrides,
+    personalize,
+    profile_facts,
+    traveller_facts,
+    with_feedback,
 )
 from app.planning.geo import walk_limit_km
 from app.planning.optimizer import optimize, schedule
 from app.planning.routing import walking_route
 from app.planning.validator import matches_avoid, validate
+from app.profile import Profile, WalkPreferences
 from app.sources import geocode, weather
 from app.sources.http import SourceError
 
-MAX_SESSIONS = 100
 # Budgets of the research runs: steps and wall-clock seconds. A repair or a feedback
 # run continues a finished plan, so it gets less than the first research.
 RESEARCH_BUDGET_S = 150.0
@@ -69,13 +84,27 @@ class PipelineError(RuntimeError):
 
 
 class PlanRequest(BaseModel):
-    request: str = Field(..., min_length=3, max_length=2000)
+    """The planner form. The text may be empty when the city is known from the form or
+    from the profile: then the brief is built from the structured inputs alone."""
+
+    request: str = Field("", max_length=2000)
     city: str | None = Field(None, max_length=100)
     # `dt.` because a field named `date` shadows the type inside the class body.
     date: dt.date | None = None
     start_time: dt.time | None = None
     end_time: dt.time | None = None
     start_point: str | None = Field(None, max_length=200)
+    preferences: WalkPreferences = Field(default_factory=WalkPreferences)
+
+    @field_validator("request")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("city", "start_point")
+    @classmethod
+    def _blank_is_none(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
 
 
 class FeedbackRequest(BaseModel):
@@ -89,10 +118,8 @@ class Session:
     state: ResearchState
     weather: list[HourWeather]
     plan: Plan | None = None
-
-
-# In-memory and bounded: a session only has to live while the user refines one walk.
-SESSIONS: OrderedDict[str, Session] = OrderedDict()
+    # New long-term memory facts learned in the last run, for the caller to store.
+    learned: list[str] = field(default_factory=list)
 
 
 async def stage(emit: Emit, name: str, status: str, label: str, detail: Any = None) -> None:
@@ -102,13 +129,31 @@ async def stage(emit: Emit, name: str, status: str, label: str, detail: Any = No
     await emit(AgentEvent(type="stage", data=data))
 
 
-async def plan_trip(req: PlanRequest, llm: LLM, emit: Emit, today: date) -> Session:
+async def plan_trip(
+    req: PlanRequest,
+    llm: LLM,
+    emit: Emit,
+    today: date,
+    profile: Profile | None = None,
+    memory: list[str] | None = None,
+) -> Session:
+    """`memory` is the traveller's long-term memory; None means the caller keeps none
+    (the eval, an anonymous run), and then nothing is learned either."""
+    if not req.request and not req.city and not (profile and profile.home_city):
+        raise PipelineError("Опишите прогулку или укажите город")
     await stage(emit, "brief", "start", "Разбираю запрос")
-    overrides = req.model_dump(exclude={"request"}, exclude_none=True)
+    form = req.model_dump(exclude={"request", "preferences"}, exclude_none=True)
     try:
-        brief = await parse_brief(llm, req.request, today, overrides)
+        brief = await parse_brief(
+            llm,
+            req.request,
+            today,
+            overrides=brief_overrides(form, req.preferences),
+            defaults=brief_defaults(profile),
+        )
     except ValueError as e:
         raise PipelineError("В запросе не указан город: напишите, где гуляем") from e
+    brief = personalize(brief, req.preferences, profile)
     await stage(emit, "brief", "done", "Запрос разобран", brief.model_dump(mode="json"))
 
     await stage(emit, "weather", "start", "Ищу город и смотрю прогноз погоды")
@@ -156,7 +201,6 @@ async def plan_trip(req: PlanRequest, llm: LLM, emit: Emit, today: date) -> Sess
         excluded=set(),
     )
     session = Session(id=uuid.uuid4().hex[:12], state=state, weather=hours)
-    _remember(session)
     await _research_and_build(
         session,
         llm,
@@ -164,15 +208,26 @@ async def plan_trip(req: PlanRequest, llm: LLM, emit: Emit, today: date) -> Sess
         goal=None,
         max_steps=settings.agent_max_steps,
         time_budget_s=RESEARCH_BUDGET_S,
+        facts=traveller_facts(profile, memory or []),
     )
+    session.learned = await _learn(llm, emit, req.request, profile, memory)
     return session
 
 
 async def apply_feedback(
-    session: Session, req: FeedbackRequest, llm: LLM, emit: Emit
+    session: Session,
+    req: FeedbackRequest,
+    llm: LLM,
+    emit: Emit,
+    profile: Profile | None = None,
+    memory: list[str] | None = None,
 ) -> tuple[Session, str | None]:
+    """`profile` and `memory` as in plan_trip; the brief was personalised when the
+    trip was planned, here they only inform the agent, the writer and the learning."""
     if session.plan is None:
         raise PipelineError("У этой сессии ещё нет маршрута")
+    session.learned = []
+    facts = traveller_facts(profile, memory or [])
     await stage(emit, "feedback", "start", "Разбираю правку")
     stops = {stop.place.id: stop.place.name for stop in session.plan.stops}
     if req.feedback.strip():
@@ -201,19 +256,34 @@ async def apply_feedback(
                 goal=edit.research_goal,
                 max_steps=FEEDBACK_STEPS,
                 time_budget_s=FEEDBACK_BUDGET_S,
+                facts=facts,
             )
         else:
-            await _write(session, llm, emit, await _build_checked(session, llm, emit))
+            plan = await _build_checked(session, llm, emit, facts)
+            await _write(session, llm, emit, plan, facts)
     except BaseException:
         # Also on cancellation (the client went away): the next edit must start from
         # the plan the traveller sees, not from half of this one.
         session.state, session.weather = saved
         raise
+    session.learned = await _learn(llm, emit, req.feedback, profile, memory)
     return session, edit.reply
 
 
-def get_session(session_id: str) -> Session | None:
-    return SESSIONS.get(session_id)
+async def _learn(
+    llm: LLM, emit: Emit, text: str, profile: Profile | None, memory: list[str] | None
+) -> list[str]:
+    """New long-term facts from the traveller's own words of this run.
+
+    Runs only after the run succeeded, and not for the "Убрать" button: an empty text
+    has nothing to learn from.
+    """
+    if memory is None or not text.strip():
+        return []
+    learned = await extract_memory(llm, [text], known=[*memory, *profile_facts(profile)])
+    if learned:
+        await emit(AgentEvent(type="memory", data={"facts": learned}))
+    return learned
 
 
 async def _research_and_build(
@@ -223,10 +293,17 @@ async def _research_and_build(
     goal: str | None,
     max_steps: int,
     time_budget_s: float,
+    facts: Sequence[str],
 ) -> None:
     await stage(emit, "research", "start", "Агент ищет места")
     result = await research(
-        llm, session.state, emit, max_steps=max_steps, goal=goal, time_budget_s=time_budget_s
+        llm,
+        session.state,
+        emit,
+        max_steps=max_steps,
+        goal=goal,
+        time_budget_s=time_budget_s,
+        traveller_facts=facts,
     )
     await stage(
         emit,
@@ -245,10 +322,10 @@ async def _research_and_build(
         # A budget or a guard fired: the request itself may be fine.
         reason = _STOP_REASONS.get(result.stop_reason, result.stop_reason)
         raise PipelineError(f"Агент остановился, не найдя мест: {reason}. Попробуйте ещё раз.")
-    await _write(session, llm, emit, await _build_checked(session, llm, emit))
+    await _write(session, llm, emit, await _build_checked(session, llm, emit, facts), facts)
 
 
-async def _build_checked(session: Session, llm: LLM, emit: Emit) -> Plan:
+async def _build_checked(session: Session, llm: LLM, emit: Emit, facts: Sequence[str]) -> Plan:
     """Build and validate the route; on errors, one bounded repair round.
 
     The validator's findings become the research agent's goal, and the stops that
@@ -272,6 +349,7 @@ async def _build_checked(session: Session, llm: LLM, emit: Emit) -> Plan:
             max_steps=REPAIR_STEPS,
             goal=goal,
             time_budget_s=REPAIR_BUDGET_S,
+            traveller_facts=facts,
         )
         plan = await _build(session, emit)
         await stage(emit, "repair", "done", "Исправление завершено", {"steps": result.steps})
@@ -283,9 +361,9 @@ async def _build_checked(session: Session, llm: LLM, emit: Emit) -> Plan:
     return plan
 
 
-async def _write(session: Session, llm: LLM, emit: Emit, plan: Plan) -> None:
+async def _write(session: Session, llm: LLM, emit: Emit, plan: Plan, facts: Sequence[str]) -> None:
     await stage(emit, "write", "start", "Пишу описания остановок")
-    session.plan = await write_texts(llm, plan)
+    session.plan = await write_texts(llm, plan, facts)
     await stage(emit, "write", "done", "Маршрут готов")
 
 
@@ -367,17 +445,10 @@ def _apply_edit(session: Session, edit: PlanEdit, excluded: set[str]) -> None:
     for pid in [*excluded, *avoided]:
         state.excluded.add(pid)
         state.shortlist.pop(pid, None)
-    brief = state.brief
-    removed = {label.lower() for label in edit.remove_interests}
-    interests = [i for i in brief.interests if i.label.lower() not in removed]
-    known = {i.label.lower() for i in interests}
-    interests += [
-        Interest(**i.model_dump()) for i in edit.add_interests if i.label.lower() not in known
-    ]
-    update: dict[str, Any] = {
-        "interests": interests,
-        "avoid": list(dict.fromkeys([*brief.avoid, *edit.add_avoid])),
-    }
+    # The feedback is the newest layer of the brief's precedence: «добавь музей» must
+    # lift the profile's «не предлагать музеи», or the validator rejects the museum.
+    brief = with_feedback(state.brief, edit.add_interests, edit.remove_interests, edit.add_avoid)
+    update: dict[str, Any] = {}
     if edit.start_time:
         update["start_time"] = edit.start_time
     if edit.end_time:
@@ -399,12 +470,6 @@ def _with_rain(hours: list[HourWeather], brief: TripBrief, rain_from: time) -> l
         by_time[t] = hour.model_copy(update={"precipitation_probability": 100})
         t += timedelta(hours=1)
     return sorted(by_time.values(), key=lambda h: h.time)
-
-
-def _remember(session: Session) -> None:
-    SESSIONS[session.id] = session
-    while len(SESSIONS) > MAX_SESSIONS:
-        SESSIONS.popitem(last=False)
 
 
 def _warning(message: str) -> AgentEvent:

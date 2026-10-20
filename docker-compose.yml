@@ -7,4 +7,5 @@ services:
       - "127.0.0.1:8000:8000"  # loopback only: every request spends the API key
     volumes:
       - ./.cache:/srv/cache  # the same cache as local runs: a rehearsal replays here too
+      - ./data:/srv/data  # the database: accounts and saved trips outlive the container
     restart: unless-stopped

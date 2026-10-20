@@ -1,14 +1,17 @@
 """The whole pipeline offline: scripted LLM, fake sources, real optimizer and validator."""
 
 import copy
+import json
 from datetime import date, datetime, time
 
 import pytest
 
 from app import pipeline
+from app.agent.prompts import MEMORY, RESEARCHER
 from app.llm import ToolCall
 from app.models import GeoPoint, HourWeather, Place, TripBrief
 from app.planning.routing import RouteResult
+from app.profile import Profile, WalkPreferences
 from app.sources import geocode, osm, weather
 from app.sources.geocode import CityInfo
 from app.sources.http import SourceError
@@ -121,7 +124,7 @@ async def test_plan_then_remove_a_stop(sources):
     assert plan.title == "Казань за утро"
     assert plan.geometry is None  # no walking route: the UI draws dotted straight lines
     assert not [v for v in plan.violations if v.severity == "error"]
-    assert pipeline.get_session(session.id) is session
+    assert session.learned == []  # no memory passed: the caller keeps none, nothing is learned
 
     # The "Убрать" button: no LLM interpretation, a short research run that must find a
     # replacement (finish is refused below the minimum), then the same optimizer and
@@ -159,6 +162,32 @@ async def test_new_avoid_phrase_drops_matching_places_without_new_research(sourc
     assert museum not in {s.place.id for s in session.plan.stops}
     assert museum in session.state.excluded
     assert not [v for v in session.plan.violations if v.severity == "error"]
+
+
+async def test_feedback_asking_for_an_avoided_topic_lifts_the_old_avoid(sources):
+    events = Recorder()
+    session, llm = await _planned(events)
+    church = PLACES[1].id
+    # As if the profile said «не предлагать храмы» when the trip was planned.
+    session.state.brief = session.state.brief.model_copy(update={"avoid": ["Храмы"]})
+    llm.structured_replies = [
+        {"add_interests": [{"label": "Храмы", "weight": 1.0, "source": "profile"}], "reply": "Ок."},
+        _texts([p.id for p in PLACES]),
+    ]
+
+    session, _ = await pipeline.apply_feedback(
+        session, pipeline.FeedbackRequest(feedback="всё-таки хочу в храм"), llm, events
+    )
+
+    # The old avoid would have made the church an error and started a repair round.
+    assert church in {s.place.id for s in session.plan.stops}
+    assert not any(e.type == "stage" and e.data["name"] == "repair" for e in events)
+    brief = session.state.brief
+    assert brief.avoid == []
+    assert [(i.label, i.source) for i in brief.interests] == [
+        ("Храмы", "request"),
+        ("история", "request"),
+    ]
 
 
 async def test_feedback_without_new_places_still_gets_the_repair_round(sources, monkeypatch):
@@ -254,6 +283,104 @@ async def test_real_streets_longer_than_the_limit_drop_the_weakest_stop(sources,
 
     assert session.plan.total_walk_m <= 3_500
     assert len(session.plan.stops) == 3 and len(session.plan.dropped) == 1
+
+
+async def test_profile_and_memory_reach_the_agent_and_new_facts_are_learned(sources):
+    profile = Profile(home_city="Казань", diet=["вегетарианец"], interests={"nature": 0.6})
+    memory = ["не любит толпы"]
+    learned = {"facts": ["любит тихие дворы", "Не любит толпы."]}
+    brief = {**_brief_reply(), "interests": [{"label": "История", "weight": 1.0}]}
+    llm = FakeLLM(
+        turns=_research_turns(), structured=[brief, _texts([p.id for p in PLACES]), learned]
+    )
+    events = Recorder()
+    req = pipeline.PlanRequest(request="Казань, 24 октября, с 10 до 13, история. Обожаю дворики")
+
+    session = await pipeline.plan_trip(req, llm, events, DAY, profile=profile, memory=memory)
+
+    stages = [e.data for e in events if e.type == "stage" and e.data["status"] == "done"]
+    brief_detail = next(d["detail"] for d in stages if d["name"] == "brief")
+    # The request has one interest: the profile fills in, discounted, after it.
+    assert [(i["label"], i["weight"], i["source"]) for i in brief_detail["interests"]] == [
+        ("История", 1.0, "request"),
+        ("Природа и парки", 0.42, "profile"),
+    ]
+    task = llm.seen[1][1]["content"]
+    assert llm.seen[1][0]["content"].startswith(RESEARCHER)
+    assert "История: search_osm historic, monument, memorial" in task
+    assert "Природа и парки: search_osm park, garden" in task
+    assert '["не любит толпы", "Питание: вегетарианец"]' in task
+    writer_input = json.loads(llm.seen[3][1]["content"])
+    assert writer_input["traveller"]["known"] == ["не любит толпы", "Питание: вегетарианец"]
+    # Memory reads the request, knows the profile, and keeps only what is new.
+    assert llm.seen[4][0]["content"] == MEMORY
+    memory_input = json.loads(llm.seen[4][1]["content"])
+    assert memory_input["messages"] == [req.request]
+    assert "Питание: вегетарианец" in memory_input["known_facts"]
+    assert session.learned == ["любит тихие дворы"]
+    assert [e.data for e in events if e.type == "memory"] == [{"facts": ["любит тихие дворы"]}]
+
+
+async def test_empty_request_with_a_city_skips_the_brief_llm_call(sources):
+    llm = FakeLLM(turns=_research_turns(), structured=[_texts([p.id for p in PLACES])])
+    req = pipeline.PlanRequest(
+        city="Казань",
+        date=DAY,
+        start_time=time(10),
+        end_time=time(13),
+        preferences=WalkPreferences(more=["history"], pace="relaxed"),
+    )
+
+    session = await pipeline.plan_trip(req, llm, Recorder(), DAY, memory=[])
+
+    brief = session.state.brief
+    assert llm.seen[0][0]["content"].startswith(RESEARCHER)  # the first LLM call is the agent's
+    assert (brief.city, brief.language, brief.pace) == ("Казань", "ru", "relaxed")
+    assert [(i.label, i.source) for i in brief.interests] == [("История", "walk")]
+    assert len(session.plan.stops) == 4
+    assert session.learned == []  # no text, nothing to learn from
+
+
+async def test_empty_request_needs_a_city_from_the_form_or_the_profile(sources):
+    llm = FakeLLM()
+    with pytest.raises(pipeline.PipelineError, match="Опишите прогулку или укажите город"):
+        await pipeline.plan_trip(pipeline.PlanRequest(request="   "), llm, Recorder(), DAY)
+    assert llm.seen == []
+
+    llm = FakeLLM(turns=_research_turns(), structured=[_texts([p.id for p in PLACES])])
+    profile = Profile(home_city="Казань", interests={"history": 1.0}, max_walk_km=6)
+    req = pipeline.PlanRequest(start_time=time(10), end_time=time(13))
+    session = await pipeline.plan_trip(req, llm, Recorder(), DAY, profile)
+    brief = session.state.brief
+    assert (brief.city, brief.max_walk_km) == ("Казань", 6)
+    assert [(i.label, i.weight, i.source) for i in brief.interests] == [("История", 0.7, "profile")]
+
+
+async def test_feedback_text_is_learned_from_and_the_remove_button_is_not(sources):
+    events = Recorder()
+    session, llm = await _planned(events)
+    llm.structured_replies = [
+        {"reply": "Учту."},
+        _texts([p.id for p in PLACES]),
+        {"facts": ["вегетарианец"]},
+    ]
+
+    session, _ = await pipeline.apply_feedback(
+        session, pipeline.FeedbackRequest(feedback="кстати, я вегетарианец"), llm, events, memory=[]
+    )
+
+    assert session.learned == ["вегетарианец"]
+    assert events[-1] == pipeline.AgentEvent(type="memory", data={"facts": ["вегетарианец"]})
+
+    removed = session.plan.stops[0].place.id
+    llm.turns = [turn(_shortlist_spare(), call("finish_research", summary="нашёл замену"))]
+    llm.structured_replies = [_texts([SPARE.id])]
+    session, _ = await pipeline.apply_feedback(
+        session, pipeline.FeedbackRequest(exclude_place_ids=[removed]), llm, events, memory=[]
+    )
+
+    assert session.learned == []  # the last run's facts are not reported twice
+    assert llm.structured_replies == []  # and the button made no memory call
 
 
 def test_rain_from_feedback_marks_the_remaining_hours_rainy():

@@ -442,6 +442,8 @@ async def test_loop_runs_tools_answers_every_call_id_and_finishes() -> None:
         "tool_result",
     ]
     assert sum(e.type == "candidate" for e in events) == 4
+    # The traveller's language is pinned in the system prompt, not only in the task.
+    assert "must be in Russian" in llm.seen[0][0]["content"]
 
 
 async def test_loop_stops_at_max_steps_and_warns_before() -> None:
@@ -544,6 +546,19 @@ async def test_writer_fills_known_stops_and_ignores_unknown_ids() -> None:
     assert (plan.stops[0].blurb, plan.stops[0].tip) == ("Коллекция Фаберже.", "Открыт до 20:45.")
     assert plan.stops[1].blurb is None  # no text for it: the UI shows the reason
     assert [s.place.id for s in plan.stops] == [MUSEUM.id, SINGER.id]
+
+
+async def test_writer_gets_what_we_know_about_the_traveller() -> None:
+    texts = {"title": "Модерн", "summary": "Коротко.", "stops": []}
+    llm = FakeLLM(structured=[texts])
+    await write_texts(llm, make_plan(), ["вегетарианец"])
+    traveller = json.loads(llm.seen[0][1]["content"])["traveller"]
+    assert traveller == {
+        "interests": ["модерн"],
+        "with_kids": False,
+        "notes": None,
+        "known": ["вегетарианец"],
+    }
 
 
 async def test_writer_failure_or_timeout_keeps_the_plan(monkeypatch: pytest.MonkeyPatch) -> None:

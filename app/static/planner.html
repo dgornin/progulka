@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Новая прогулка — Прогулка</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23c8412a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400..700&family=JetBrains+Mono:wght@400;500;600&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.css"
+        integrity="sha384-S+OnE5M4U3Qc2nR0RgljGrVs06xqfRg8L7uFk/pOF5+sRuSDG4oKkqKZmFrx7w09" crossorigin="">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/planner.css">
+  <!-- MapLibre 6 ships only ES modules; the import map pins the file and its hash, and must precede any module script -->
+  <script type="importmap">
+    {
+      "imports": { "maplibre-gl": "https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.mjs" },
+      "integrity": {
+        "https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.mjs": "sha384-f3IomKpQJ9QgLFg9JJeeIXKzhYFCZFLXDs4FbQLY13Y1uiaEctrT8RHbumCfpsAc"
+      }
+    }
+  </script>
+  <script type="module" src="/static/js/planner.js"></script>
+</head>
+<body class="is-app">
+  <header id="topbar" class="topbar"></header>
+
+  <main class="planner" id="planner">
+    <aside class="side">
+      <form class="card composer" id="composer" novalidate>
+        <div class="recap" id="recap" hidden></div>
+
+        <div class="composer-body" id="composer-body">
+          <div class="composer-head">
+            <label class="composer-label" for="request">Опишите прогулку</label>
+            <p class="field-hint" id="request-hint">Как другу: город, время, что любите. Если город указан ниже или в профиле, можно ничего не писать.</p>
+          </div>
+          <textarea class="textarea" id="request" name="request" rows="4" maxlength="2000"
+                    aria-describedby="request-hint request-error"
+                    placeholder="Суббота в Петербурге, с 11 до 18. Люблю конструктивизм и стрит-арт, хочу попробовать местную уличную еду, музеи не надо. Старт от Московского вокзала."></textarea>
+          <p class="field-error" id="request-error" aria-live="polite"></p>
+          <div class="examples">
+            <span>Например:</span>
+            <button type="button" class="example"
+                    data-example="Суббота в Петербурге, с 11 до 18. Люблю конструктивизм и стрит-арт, хочу попробовать местную уличную еду, музеи не надо. Старт от Московского вокзала.">Петербург · конструктивизм</button>
+            <button type="button" class="example"
+                    data-example="Воскресенье в Москве с 10 до 16, гуляем с ребёнком 8 лет. Парки, что-нибудь про науку и где вкусно пообедать, без долгих переходов. Начнём от метро «Парк культуры».">Москва · с ребёнком</button>
+            <button type="button" class="example"
+                    data-example="Казань, один день с 12 до 20. Татарская кухня, мечети и старинные купеческие дома, а вечером — красивый вид на закат. Старт у Кремля.">Казань · кухня и закат</button>
+          </div>
+
+          <details class="drawer" id="tune" open>
+            <summary>
+              <span class="drawer-title">Настроить прогулку</span>
+              <span class="count" id="tune-count" hidden></span>
+            </summary>
+            <div class="tune" id="tune-body"></div>
+          </details>
+
+          <details class="drawer">
+            <summary><span class="drawer-title">Уточнить</span></summary>
+            <div class="refine-grid">
+              <label class="field">Город <input class="input" name="city" autocomplete="off" maxlength="100" placeholder="Санкт-Петербург"></label>
+              <label class="field">Дата <input class="input" name="date" type="date"></label>
+              <label class="field">Начало <input class="input" name="start_time" type="time"></label>
+              <label class="field">Конец <input class="input" name="end_time" type="time"></label>
+              <label class="field wide">Точка старта <input class="input" name="start_point" autocomplete="off" maxlength="200" placeholder="Московский вокзал"></label>
+            </div>
+          </details>
+
+          <p class="profile-note" id="profile-note"></p>
+          <div class="composer-actions">
+            <button class="btn btn-primary btn-lg" id="build" type="submit" disabled>Построить маршрут</button>
+            <button class="btn btn-ghost btn-lg" id="cancel-edit" type="button" hidden>Отмена</button>
+          </div>
+          <p class="replan-note" id="replan-note" hidden>Текущий маршрут останется в «Моих прогулках».</p>
+        </div>
+      </form>
+
+      <section class="card trace" aria-labelledby="trace-title">
+        <div class="trace-head">
+          <div class="trace-title-row">
+            <h2 id="trace-title">Ход работы агента</h2>
+            <p class="health" id="health" data-state="pending">проверяю сервер…</p>
+          </div>
+          <ol class="steps" id="steps"></ol>
+          <div class="status-row">
+            <p class="status" id="status" aria-live="polite"></p>
+            <button class="btn btn-sm stop-run" id="stop" type="button" hidden>Остановить агента</button>
+          </div>
+        </div>
+        <p class="hint" id="trace-hint">Здесь будет видно, как агент работает: какие источники спрашивает,
+          что находит, какие места берёт в маршрут и почему.</p>
+        <ol class="trace-log" id="log"></ol>
+      </section>
+    </aside>
+
+    <section class="map-wrap" aria-label="Карта маршрута">
+      <div id="map"></div>
+      <ul class="map-legend" id="map-legend" hidden></ul>
+      <div class="map-fallback" id="map-fallback" hidden></div>
+    </section>
+
+    <section class="card plan-col" aria-label="Маршрут">
+      <div class="plan" id="plan"></div>
+      <form class="feedback" id="feedback" hidden>
+        <p class="reply" id="reply" hidden></p>
+        <label for="feedback-text">Что изменить?</label>
+        <div class="feedback-row">
+          <textarea class="textarea" id="feedback-text" name="feedback" rows="2" maxlength="1000"
+                    placeholder="Например: добавь кофейню после обеда"></textarea>
+          <button type="submit" class="btn btn-primary" id="rebuild">Перестроить</button>
+        </div>
+        <p class="feedback-hint">Агент продолжит с того же места: найденные места он помнит. ⌘/Ctrl + Enter — отправить.</p>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

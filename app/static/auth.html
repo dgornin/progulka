@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход — Прогулка</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23c8412a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400..700&family=JetBrains+Mono:wght@400;500;600&family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
+  <script type="module" src="/static/js/auth.js"></script>
+</head>
+<body>
+  <main class="auth">
+    <section class="auth-main">
+      <a class="brand" href="/" aria-label="Прогулка — на главную">
+        <svg class="logo" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M7 35 C 13 18, 26 32, 30 17 S 36 8, 37 8" fill="none" stroke="currentColor"
+                stroke-width="2.5" stroke-linecap="round" stroke-dasharray="0.1 5.5"/>
+          <circle class="logo-start" cx="7" cy="35" r="4.5"/>
+          <circle cx="19" cy="25.5" r="3.5" fill="currentColor"/>
+          <circle cx="37" cy="8" r="4.5" fill="currentColor"/>
+        </svg>
+        <span class="brand-name">Прогулка</span>
+      </a>
+
+      <div class="auth-box">
+        <header class="auth-head">
+          <h1 class="title" id="auth-title">С возвращением</h1>
+          <p class="muted" id="auth-lead">Войдите, чтобы вернуться к своим прогулкам.</p>
+        </header>
+
+        <div class="tabs" role="tablist" aria-label="Вход или регистрация">
+          <button class="tab" type="button" role="tab" id="tab-login" aria-controls="login-form" aria-selected="true">Вход</button>
+          <button class="tab" type="button" role="tab" id="tab-register" aria-controls="register-form" aria-selected="false" tabindex="-1">Регистрация</button>
+        </div>
+
+        <form class="auth-form" id="login-form" role="tabpanel" aria-labelledby="tab-login" novalidate>
+          <div class="field">
+            <label for="login-email">Почта</label>
+            <input class="input" id="login-email" name="email" type="email" autocomplete="email" maxlength="254"
+                   placeholder="anna@example.com" aria-describedby="login-email-error">
+            <p class="field-error" id="login-email-error"></p>
+          </div>
+          <div class="field">
+            <label for="login-password">Пароль</label>
+            <div class="password">
+              <input class="input" id="login-password" name="password" type="password" autocomplete="current-password"
+                     maxlength="128" aria-describedby="login-password-error">
+              <button class="password-toggle" type="button" aria-controls="login-password" aria-pressed="false">Показать</button>
+            </div>
+            <p class="field-error" id="login-password-error"></p>
+          </div>
+          <p class="alert is-error" role="alert" hidden></p>
+          <button class="btn btn-primary btn-lg btn-block" type="submit">Войти</button>
+        </form>
+
+        <form class="auth-form" id="register-form" role="tabpanel" aria-labelledby="tab-register" novalidate hidden>
+          <div class="field">
+            <label for="register-name">Как к вам обращаться</label>
+            <input class="input" id="register-name" name="name" autocomplete="name" maxlength="60"
+                   placeholder="Анна" aria-describedby="register-name-error">
+            <p class="field-error" id="register-name-error"></p>
+          </div>
+          <div class="field">
+            <label for="register-email">Почта</label>
+            <input class="input" id="register-email" name="email" type="email" autocomplete="email" maxlength="254"
+                   placeholder="anna@example.com" aria-describedby="register-email-error">
+            <p class="field-error" id="register-email-error"></p>
+          </div>
+          <div class="field">
+            <label for="register-password">Пароль</label>
+            <div class="password">
+              <input class="input" id="register-password" name="password" type="password" autocomplete="new-password"
+                     maxlength="128" aria-describedby="register-password-hint register-password-error">
+              <button class="password-toggle" type="button" aria-controls="register-password" aria-pressed="false">Показать</button>
+            </div>
+            <p class="field-hint" id="register-password-hint">Не меньше 8 символов</p>
+            <p class="field-error" id="register-password-error"></p>
+          </div>
+          <p class="alert is-error" role="alert" hidden></p>
+          <button class="btn btn-primary btn-lg btn-block" type="submit">Создать аккаунт</button>
+          <p class="fine-print">Дальше — анкета из трёх коротких шагов об интересах. Её можно пропустить и заполнить потом.</p>
+        </form>
+
+        <aside class="demo-card" id="demo" aria-labelledby="demo-title" hidden>
+          <div class="demo-head">
+            <p class="eyebrow" id="demo-title">Демо-аккаунт</p>
+            <p>Посмотреть всё сразу: без регистрации и анкеты, профиль уже заполнен.</p>
+          </div>
+          <dl class="demo-creds">
+            <div><dt>Почта</dt><dd id="demo-email"></dd></div>
+            <div><dt>Пароль</dt><dd id="demo-password"></dd></div>
+          </dl>
+          <button class="btn btn-block" type="button" id="demo-login">Войти как демо</button>
+          <p class="alert is-error" role="alert" hidden></p>
+        </aside>
+      </div>
+    </section>
+
+    <aside class="auth-side" aria-hidden="true">
+      <img src="/static/img/route-example.jpg" alt="" width="1520" height="1280">
+      <span class="auth-credit">© OpenFreeMap · © участники OpenStreetMap</span>
+      <div class="auth-quote">
+        <p class="auth-quote-label">Запрос</p>
+        <p class="auth-quote-text">«Суббота в Петербурге, с 11 до 18. Люблю конструктивизм и стрит-арт, хочу уличную еду, музеи не надо»</p>
+        <p class="auth-quote-result"><span>12 остановок</span><span>9,1 км</span><span>0 закрытых мест</span></p>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>

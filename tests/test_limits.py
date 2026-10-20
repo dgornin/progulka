@@ -1,7 +1,7 @@
 import pytest
 
 from app import limits as limits_module
-from app.limits import Limits
+from app.limits import Limits, SlidingWindow
 
 
 def test_all_limits_off_by_default():
@@ -45,3 +45,42 @@ def test_release_never_goes_negative(cost):
     limits = Limits(per_hour=0, daily_budget_usd=0, max_concurrent=1)
     limits.release(cost)
     assert limits.running == 0
+
+
+def test_sliding_window_counts_per_key_and_forgets_old_events(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(limits_module.time, "monotonic", lambda: clock[0])
+    window = SlidingWindow(limit=2, window_s=300)
+
+    window.add("a")
+    clock[0] += 100
+    window.add("a")
+    assert window.full("a") and not window.full("b")
+    clock[0] += 201  # the first event left the window
+    assert not window.full("a")
+
+
+def test_sliding_window_takes_back_an_event():
+    window = SlidingWindow(limit=2, window_s=300)
+    window.add("a")
+    window.add("a")
+
+    window.undo("a")
+    window.undo("b")  # nothing recorded: nothing to take back
+
+    assert not window.full("a")
+    window.add("a")
+    assert window.full("a")
+
+
+def test_sliding_window_off_at_zero():
+    window = SlidingWindow(limit=0, window_s=300)
+    for _ in range(100):
+        window.add("a")
+    assert not window.full("a")
+
+
+def test_spend_before_a_restart_counts_against_the_budget():
+    limits = Limits(per_hour=0, daily_budget_usd=0.02, max_concurrent=0)
+    limits.spend(0.02)
+    assert "Дневной лимит" in limits.admit("a")
