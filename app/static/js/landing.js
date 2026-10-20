@@ -1,8 +1,8 @@
 /*
  * The landing page is static HTML that works without this script. The script only
  * adjusts the calls to action to what is true right now: a visitor who is already
- * signed in gets the way back to their walks instead of «Начать» / «Войти», and the
- * demo buttons disappear when the server has no demo account to offer.
+ * signed in gets the way back to their journeys instead of «Спланировать поездку» /
+ * «Войти», and the demo buttons disappear when the server has no demo account to offer.
  */
 
 import { api, currentUser } from "./api.js";

@@ -1,4 +1,4 @@
-"""Database schema: accounts, login sessions, long-term memory and saved trips.
+"""Database schema: accounts, login sessions, long-term memory, journeys and their days.
 
 SQLite through SQLAlchemy's async engine (aiosqlite): one file on a Docker volume is
 all a single-server course project needs, there is no database server to run, and
@@ -6,23 +6,47 @@ the async driver keeps the event loop free while the agent streams. The ORM is t
 (Mapped[...]) and the URL comes from settings: another database needs only its async
 driver and DATABASE_URL.
 
-A trip keeps the whole research state of the pipeline as JSON (places found, the
-shortlist, rejected places, the parsed brief) next to the plan: that is what lets a
-trip be continued with feedback after a server restart, without searching again.
+A journey (1..7 days in one city) is a row in `journeys`; each of its days is a row in
+`trips` that keeps the day's whole research state as JSON (places found, the shortlist,
+rejected places, the day's brief) next to its route: that is what lets one day be
+continued with feedback after a server restart, without searching again.
 
-The schema is created with create_all at startup and there are no migrations: the
-tables are new and have no production data to carry over yet. When a column changes
-after real users appear, that is the moment to add Alembic.
+The schema is created with create_all. The one change since the first deploy (a trip,
+once a whole walk, became a day of a journey) is migrated at startup by
+`_journeys_from_trips` rather than with Alembic: one SQLite file and one change need a
+few ALTERs and a copy, not a migration framework with its own history table, scripts
+and upgrade step. The next schema change is the moment to add Alembic, with this
+schema as its baseline.
 """
 
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, TypeDecorator, event, make_url
+from pydantic import TypeAdapter
+from sqlalchemy import (
+    JSON,
+    Connection,
+    Date,
+    DateTime,
+    ForeignKey,
+    RowMapping,
+    String,
+    Text,
+    TypeDecorator,
+    event,
+    insert,
+    inspect,
+    make_url,
+    text,
+    update,
+)
 from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.agent.outline import one_day
+from app.models import DayOutline, GeoPoint, TripBrief
 
 # Width of a stored memory fact; facts the pipeline learns are far shorter (memory.py).
 FACT_COLUMN_CHARS = 300
@@ -78,30 +102,50 @@ class MemoryFact(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     text: Mapped[str] = mapped_column(String(FACT_COLUMN_CHARS))
+    # The day it was learned on, which leads to its journey.
     source_trip_id: Mapped[str | None] = mapped_column(ForeignKey("trips.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class Journey(Base):
+    __tablename__ = "journeys"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # pipeline Journey.id
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    # Copies of the brief, so the journey list never parses it.
+    city: Mapped[str] = mapped_column(String(100))
+    date_from: Mapped[date]
+    date_to: Mapped[date]  # inclusive; equals date_from for one day
+    brief: Mapped[dict[str, Any]]  # TripBrief of the whole journey; each day has its own
+    start: Mapped[dict[str, Any]]  # GeoPoint: the hotel or the start point
+    outline: Mapped[list[Any]]  # [DayOutline]: the theme and area of every day
+    request: Mapped[str] = mapped_column(Text)  # the first request, as typed
+    preferences: Mapped[dict[str, Any]]  # app.profile.WalkPreferences of the first request
+    history: Mapped[list[Any]]  # [store.HistoryEntry]: every run with its day, reply and cost
+    cost_usd: Mapped[float] = mapped_column(default=0.0)  # LLM spend of all runs
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+
+
 class Trip(Base):
+    """One day of a journey: its route and the research state feedback continues from."""
+
     __tablename__ = "trips"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)  # pipeline TripRun.id
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    title: Mapped[str] = mapped_column(String(200))
-    city: Mapped[str] = mapped_column(String(100))
+    journey_id: Mapped[str] = mapped_column(
+        ForeignKey("journeys.id", ondelete="CASCADE"), index=True
+    )
+    day_index: Mapped[int]
     date: Mapped[date]
-    # Copies of plan fields, so the trip list never parses the plans.
+    # Copies of plan fields, so the journey list never parses the plans.
     stops: Mapped[int]
     walk_km: Mapped[float]
-    request: Mapped[str] = mapped_column(Text)  # the first request, as typed
-    preferences: Mapped[dict[str, Any]]  # app.profile.WalkPreferences of the first request
     state: Mapped[dict[str, Any]]  # ResearchState: what feedback continues from
     weather: Mapped[list[Any]]  # [HourWeather], with the traveller's own rain marks
     plan: Mapped[dict[str, Any]]
-    history: Mapped[list[Any]]  # [store.HistoryEntry]: every run with its reply and cost
-    cost_usd: Mapped[float] = mapped_column(default=0.0)  # LLM spend of all runs
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
 
 
 def connect(url: str) -> AsyncEngine:
@@ -125,3 +169,88 @@ def connect(url: str) -> AsyncEngine:
 async def create_schema(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_journeys_from_trips)
+
+
+# What a trip row held while a trip was a whole walk; all of it now belongs to its journey.
+_MOVED_TO_JOURNEY = (
+    "title",
+    "city",
+    "request",
+    "preferences",
+    "history",
+    "cost_usd",
+    "created_at",
+    "updated_at",
+)
+_OUTLINE = TypeAdapter(list[DayOutline])
+
+
+def _journeys_from_trips(conn: Connection) -> None:
+    """Make every trip saved before journeys existed a one-day journey of its own.
+
+    The journey takes the trip's id, so old links (/app/trips/<id>) open it. Each step
+    checks the schema before it acts: the migration runs at every start, does nothing
+    once done, and a start interrupted halfway finishes it at the next one.
+    """
+    columns = {column["name"] for column in inspect(conn).get_columns("trips")}
+    if "journey_id" not in columns:
+        # Nullable: SQLite adds a REFERENCES column to a table with rows only as NULL.
+        conn.exec_driver_sql(
+            "ALTER TABLE trips ADD COLUMN journey_id VARCHAR(32) "
+            "REFERENCES journeys (id) ON DELETE CASCADE"
+        )
+    if "day_index" not in columns:
+        conn.exec_driver_sql("ALTER TABLE trips ADD COLUMN day_index INTEGER NOT NULL DEFAULT 0")
+    if "request" in columns:
+        old = conn.execute(
+            text(
+                "SELECT id, user_id, title, city, date, request, preferences, state, history,"
+                " cost_usd, created_at, updated_at FROM trips WHERE journey_id IS NULL"
+            ).columns(
+                date=Date,
+                preferences=JSON,
+                state=JSON,
+                history=JSON,
+                created_at=UTCDateTime,
+                updated_at=UTCDateTime,
+            )
+        ).all()
+        if old:
+            conn.execute(insert(Journey), [_journey_of_trip(row._mapping) for row in old])
+            conn.execute(update(Trip).where(Trip.journey_id.is_(None)).values(journey_id=Trip.id))
+    moved = [column for column in _MOVED_TO_JOURNEY if column in columns]
+    if moved:
+        # SQLite does not drop an indexed column.
+        conn.exec_driver_sql("DROP INDEX IF EXISTS ix_trips_updated_at")
+        for column in moved:
+            conn.exec_driver_sql(f"ALTER TABLE trips DROP COLUMN {column}")
+    for index in Trip.__table__.indexes:
+        index.create(conn, checkfirst=True)
+
+
+def _journey_of_trip(trip: RowMapping) -> dict[str, Any]:
+    """The journeys row of an old trip row: a single walk, outlined as the pipeline
+    outlines one today."""
+    brief = TripBrief.model_validate(trip["state"]["brief"])
+    outline = [one_day(brief, GeoPoint.model_validate(trip["state"]["start"]))]
+    return {
+        "id": trip["id"],
+        "user_id": trip["user_id"],
+        "title": trip["title"],
+        "city": trip["city"],
+        "date_from": trip["date"],
+        "date_to": trip["date"],
+        "brief": trip["state"]["brief"],
+        "start": trip["state"]["start"],
+        "outline": _OUTLINE.dump_python(outline, mode="json"),
+        "request": trip["request"],
+        "preferences": trip["preferences"],
+        # The first run planned the whole trip; every later one changed its only day.
+        "history": [
+            {**entry, "day": None if entry["kind"] == "plan" else 0} for entry in trip["history"]
+        ],
+        "cost_usd": trip["cost_usd"],
+        "created_at": trip["created_at"],
+        "updated_at": trip["updated_at"],
+    }

@@ -184,6 +184,9 @@ def make_plan() -> Plan:
     return Plan(brief=make_brief(), start=START, stops=stops, total_walk_m=1500, total_minutes=160)
 
 
+SHORTLIST_ARGS = {"score": 0.9, "interests": [], "reason": "подходит"}
+
+
 class Recorder(list[AgentEvent]):
     async def __call__(self, event: AgentEvent) -> None:
         self.append(event)
@@ -405,6 +408,80 @@ async def test_finish_is_rejected_while_a_must_include_place_is_missing() -> Non
     assert not outcome.finished and "must_include 'Эрмитаж'" in outcome.error
 
 
+async def test_places_another_day_planned_are_hidden_and_cannot_be_shortlisted() -> None:
+    state = make_state()
+    await search_all(state)
+    await execute(state, "shortlist_place", shortlist_call(MURAL, ["модерн"]).arguments)
+    state.taken = {MUSEUM.id, MURAL.id}
+
+    found = json.loads((await run_tool(state, "search_osm", categories=list(CATALOG))).content)
+    taken = await run_tool(state, "shortlist_place", place_id=MUSEUM.id, **SHORTLIST_ARGS)
+    finish = await run_tool(state, "finish_research", summary="готово")
+
+    assert [p["id"] for p in found["places"]] == [CAFE.id]
+    assert "another day" in taken.error
+    # The shortlisted mural is planned on another day: it does not count for this one.
+    assert "the shortlist has 0 places" in finish.error
+    assert list(state.available()) == [] and list(state.shortlist) == [MURAL.id]
+
+
+async def test_days_sharing_their_searches_send_one_query_and_retry_a_failed_one(
+    monkeypatch: pytest.MonkeyPatch, sources: list[tuple[Any, ...]]
+) -> None:
+    first, second = make_state(), make_state()
+    second.registry, second.searches = first.registry, first.searches
+
+    await asyncio.gather(
+        run_tool(first, "search_osm", categories=["museum"]),
+        run_tool(second, "search_osm", categories=["museum"]),
+    )
+    assert sources == [("osm", ("museum",), 1500)]
+    assert MUSEUM.id in second.registry
+
+    working = wikipedia.search
+    monkeypatch.setattr(wikipedia, "search", broken_source)
+    failed = await run_tool(first, "search_wikipedia", query="модерн")
+    monkeypatch.setattr(wikipedia, "search", working)
+    retried = await run_tool(second, "search_wikipedia", query="модерн")
+
+    assert "HTTP 504" in failed.error and retried.count == 1
+
+
+async def test_a_day_sees_the_sources_record_whatever_another_day_looked_up() -> None:
+    first, second = make_state(), make_state()
+    second.registry = first.registry
+    await run_tool(first, "search_wikipedia", query="модерн")
+    await run_tool(first, "get_place_details", place_id=SINGER.id)
+
+    outcome = await run_tool(second, "search_wikipedia", query="модерн")
+
+    [shown] = json.loads(outcome.content)["places"]
+    assert shown["snippet"] == SINGER.description  # not the extract the first day fetched
+    assert second.registry[SINGER.id].description == EXTRACT  # the writer still gets it
+
+
+async def test_a_search_its_last_day_gave_up_on_is_not_awaited_by_the_next() -> None:
+    queries: list[int] = []
+
+    async def fetch() -> list[Place]:
+        queries.append(len(queries))
+        await asyncio.sleep(1 if len(queries) == 1 else 0)
+        return [MUSEUM]
+
+    state = make_state()
+    first = asyncio.create_task(tools._shared(state, "osm museum", fetch))
+    await asyncio.sleep(0)
+    first.cancel()  # its tool call timed out
+    # Another day sends the same search before the abandoned query has been cancelled.
+    second = asyncio.create_task(tools._shared(state, "osm museum", fetch))
+
+    results = await asyncio.gather(first, second, return_exceptions=True)
+
+    assert isinstance(results[0], asyncio.CancelledError)
+    assert results[1] == [MUSEUM] and queries == [0, 1]
+    assert state.searches["osm museum"].task.result() == [MUSEUM]
+
+
 # --- research loop -------------------------------------------------------------------
 
 # The loop's budgets are the caller's to set; these are generous enough for every script.
@@ -507,7 +584,7 @@ async def test_brief_defaults_fill_what_the_request_does_not_say() -> None:
     brief = await parse_brief(llm, "Погулять по Питеру", today=date(2026, 10, 19))
     assert "2026-10-19 (Monday)" in llm.seen[0][1]["content"]
     assert brief.date == date(2026, 10, 19)  # a date in the past falls back to today
-    assert (brief.start_time, brief.end_time) == (time(10), time(15))
+    assert (brief.start_time, brief.end_time) == (time(10), time(18))
     assert (brief.language, brief.pace) == ("ru", "normal")
 
 
@@ -523,23 +600,48 @@ async def test_brief_overrides_win_and_an_empty_window_is_fixed() -> None:
     llm = FakeLLM(structured=[draft])
     brief = await parse_brief(llm, "street art walk", date(2026, 10, 19), overrides)
     assert (brief.city, brief.date, brief.language) == ("Казань", date(2026, 10, 25), "en")
-    # The form's 11:00 outranks the text's 18:00: the walk moves to the five hours before it.
-    assert (brief.start_time, brief.end_time) == (time(6), time(11))
+    # The form's 11:00 outranks the text's 18:00: the walk moves to the eight hours before it.
+    assert (brief.start_time, brief.end_time) == (time(3), time(11))
     assert brief.interests == [Interest(label="street art", weight=1.0)]
 
 
 @pytest.mark.parametrize(
     ("overrides", "window"),
     [
-        ({"end_time": "09:00"}, (time(4), time(9))),  # before the default 10:00 start
+        ({"end_time": "09:00"}, (time(1), time(9))),  # before the default 10:00 start
         ({"end_time": "03:00"}, (time(0), time(3))),  # not before midnight
-        ({"start_time": "16:00", "end_time": "12:00"}, (time(16), time(21))),
-        ({"start_time": "23:59"}, (time(23, 59), time(23, 59))),  # plan_trip refuses it
+        ({"start_time": "16:00", "end_time": "12:00"}, (time(16), time(23, 59))),
+        ({"start_time": "23:59"}, (time(23, 59), time(23, 59))),  # plan_journey refuses it
     ],
 )
 async def test_brief_window_keeps_the_forms_end_time(overrides, window) -> None:
     brief = await parse_brief(FakeLLM(), "", date(2026, 10, 19), {"city": "Казань", **overrides})
     assert (brief.start_time, brief.end_time) == window
+
+
+@pytest.mark.parametrize(
+    ("said", "form", "days"),
+    [
+        ({"date": "2026-10-24", "date_to": "2026-10-28"}, {}, ("2026-10-24", "2026-10-28")),
+        ({"date": "2026-10-24", "days": 5}, {}, ("2026-10-24", "2026-10-28")),
+        ({"days": 1}, {}, ("2026-10-19", None)),
+        ({"date": "2026-10-24", "date_to": "2026-10-23"}, {}, ("2026-10-24", None)),
+        # The form's calendar moves the start; the length said in the text stays.
+        ({"date": "2026-10-24", "days": 3}, {"date": "2026-11-01"}, ("2026-11-01", "2026-11-03")),
+        (
+            {"days": 3},
+            {"date": "2026-11-01", "date_to": "2026-11-02"},
+            ("2026-11-01", "2026-11-02"),
+        ),
+    ],
+)
+async def test_brief_reads_the_days_of_the_trip(
+    said: dict[str, Any], form: dict[str, Any], days: tuple[str, str | None]
+) -> None:
+    llm = FakeLLM(structured=[{"city": "Казань", **said}])
+    brief = await parse_brief(llm, "Казань на несколько дней", date(2026, 10, 19), form)
+    expected = tuple(date.fromisoformat(d) if d else None for d in days)
+    assert (brief.date, brief.date_to) == expected
 
 
 async def test_brief_without_a_city_is_an_error() -> None:

@@ -1,7 +1,8 @@
 """Agent vs. the same model with one prompt: are the routes real and walkable?
 
 For every request in queries.json we build two plans with the SAME model:
-- agent: the full pipeline (tools, optimizer, validator);
+- agent: the full pipeline (tools, optimizer, validator); every query is one day, so
+  the trip is a single walk with no day plan, the same pipeline as a day of a longer trip;
 - baseline: one prompt, no tools — "plan a walking route, return JSON".
 Then both are checked by the same code:
 - real places (located): the stop has coordinates. Agent stops are source records
@@ -32,7 +33,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.llm import LLM
 from app.models import AgentEvent, GeoPoint, TripBrief
-from app.pipeline import PlanRequest, plan_trip
+from app.pipeline import PlanRequest, plan_journey
 from app.planning.geo import haversine_m, street_meters, walk_minutes
 from app.planning.hours import is_open
 from app.sources import geocode
@@ -128,8 +129,8 @@ async def run_agent(base: LLM, request: str) -> tuple[Metrics, TripBrief, GeoPoi
         events.append(event)
 
     started = clock.monotonic()
-    trip_run = await plan_trip(PlanRequest(request=request), llm, collect, today=TODAY)
-    plan = trip_run.plan
+    journey = await plan_journey(PlanRequest(request=request), llm, collect, today=TODAY)
+    plan = journey.days[0].plan
     points = [
         Point(s.place.name, s.place.lat, s.place.lon, s.place.opening_hours, s.arrive, s.depart)
         for s in plan.stops

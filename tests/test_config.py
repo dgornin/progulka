@@ -34,3 +34,11 @@ def test_accounts_and_cookie_flags(monkeypatch):
     assert settings.cookie_secure
     assert (settings.demo_email, settings.demo_password) == ("demo@progulka.app", "progulka-demo")
     assert settings.admin_email == ""
+
+
+def test_speech_model_has_a_default_and_can_be_changed(monkeypatch):
+    monkeypatch.delenv("STT_MODEL", raising=False)
+    assert load_settings().stt_model == "qwen/qwen3.8-omni-flash"
+
+    monkeypatch.setenv("STT_MODEL", "google/gemini-3.5-flash")
+    assert load_settings().stt_model == "google/gemini-3.5-flash"

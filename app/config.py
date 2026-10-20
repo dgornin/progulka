@@ -29,6 +29,8 @@ class Settings:
     api_key: str
     base_url: str
     model_name: str
+    # Transcribes voice input: a chat model that accepts audio (app/agent/speech.py).
+    stt_model: str
     temperature: float
     reasoning: str  # "off" | "low" | "medium" | "high"
     agent_max_steps: int
@@ -60,6 +62,7 @@ def load_settings() -> Settings:
         api_key=_env("API_KEY", ""),
         base_url=_env("BASE_URL", "https://openrouter.ai/api/v1"),
         model_name=_env("MODEL_NAME", ""),
+        stt_model=_env("STT_MODEL", "qwen/qwen3.8-omni-flash"),
         temperature=float(_env("LLM_TEMPERATURE", "0.2")),
         reasoning=_env("LLM_REASONING", "off"),
         agent_max_steps=int(_env("AGENT_MAX_STEPS", "14")),

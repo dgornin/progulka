@@ -12,6 +12,13 @@ Context hygiene: the model sees at most 25 compact results per search (id, name,
 kind, distance, hours, a 160-character snippet); full records stay in the registry.
 A slow source (Overpass can take a minute) is cut off after TOOL_TIMEOUT_S and
 reported as an error, so one tool call cannot eat the whole research budget.
+
+The days of a multi-day trip are researched in parallel, one ResearchState each, and
+share two things: the registry (a place one day found is known to all, and its
+enriched record serves every day) and the source queries (`searches`): days that
+start from the same point send the same searches at the same moment, before the HTTP
+cache has an answer, and one query serves them all. `taken` marks the places other
+days of the trip have planned: never shown, never shortlisted.
 """
 
 import asyncio
@@ -21,7 +28,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import time
 from math import ceil
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -53,6 +60,15 @@ class ResearchState:
     shortlist: dict[str, Candidate] = field(default_factory=dict)
     excluded: set[str] = field(default_factory=set)  # ids the traveller rejected
     finish_attempts: int = 0  # finish_research calls in the current research run
+    # Transient, never saved (exclude=True): set by the pipeline before every run, from
+    # what the other days have planned at that moment.
+    taken: Annotated[set[str], Field(exclude=True)] = field(default_factory=set)
+    # Transient: source query key -> _Search, shared by the days of one planning run.
+    searches: Annotated[dict[str, Any], Field(exclude=True)] = field(default_factory=dict)
+
+    def available(self) -> dict[str, Candidate]:
+        """The shortlist without the places other days of the trip have planned."""
+        return {pid: c for pid, c in self.shortlist.items() if pid not in self.taken}
 
 
 @dataclass
@@ -221,18 +237,28 @@ def min_candidates(brief: TripBrief) -> int:
 
 
 async def _search_osm(state: ResearchState, args: SearchOsm) -> ToolOutcome:
-    places = await osm.search_places(state.start, args.radius_m, args.categories)
+    places = await _shared(
+        state,
+        f"osm {_around(state)} {args.model_dump_json()}",
+        lambda: osm.search_places(state.start, args.radius_m, args.categories),
+    )
     label = f"OpenStreetMap ({', '.join(args.categories)}, {args.radius_m} м)"
     return _search_outcome(state, places, label)
 
 
 async def _search_wikipedia(state: ResearchState, args: SearchWikipedia) -> ToolOutcome:
     lang = state.brief.language
+    key = f"wikipedia {lang} {_around(state)} {args.model_dump_json()}"
     if args.query:
-        places = await wikipedia.search(args.query, state.start, args.radius_m, lang=lang)
+        query = args.query
+        places = await _shared(
+            state, key, lambda: wikipedia.search(query, state.start, args.radius_m, lang=lang)
+        )
         label = f"Википедия «{args.query}» ({args.radius_m} м)"
     else:
-        places = await wikipedia.nearby(state.start, args.radius_m, lang=lang)
+        places = await _shared(
+            state, key, lambda: wikipedia.nearby(state.start, args.radius_m, lang=lang)
+        )
         label = f"Википедия рядом ({args.radius_m} м)"
     return _search_outcome(state, places, label)
 
@@ -240,8 +266,12 @@ async def _search_wikipedia(state: ResearchState, args: SearchWikipedia) -> Tool
 async def _get_wikivoyage_listings(
     state: ResearchState, args: GetWikivoyageListings
 ) -> ToolOutcome:
-    places = await wikivoyage.listings(
-        state.brief.city, lang=state.brief.language, sections=[args.section]
+    brief = state.brief
+    # The listings are the city's, whatever the start: every day shares them.
+    places = await _shared(
+        state,
+        f"wikivoyage {brief.language} {brief.city} {args.section}",
+        lambda: wikivoyage.listings(brief.city, lang=brief.language, sections=[args.section]),
     )
     return _search_outcome(state, places, f"Wikivoyage ({args.section})")
 
@@ -357,13 +387,61 @@ def _parameters(args_model: type[BaseModel]) -> tuple[str, dict[str, Any]]:
     return description, schema
 
 
+@dataclass
+class _Search:
+    task: asyncio.Future[list[Place]]
+    waiters: int = 0
+
+
+async def _shared(
+    state: ResearchState, key: str, fetch: Callable[[], Awaitable[list[Place]]]
+) -> list[Place]:
+    """Run a source query once for every day of the trip that sends it (see the module
+    docstring). A failed query is forgotten, so a later call tries again."""
+    search = state.searches.get(key)
+    if search is None:
+        search = state.searches[key] = _Search(asyncio.ensure_future(fetch()))
+
+        def forget_failure(done: asyncio.Future[list[Place]]) -> None:
+            if done.cancelled() or done.exception() is not None:
+                _forget(state, key, search)
+
+        search.task.add_done_callback(forget_failure)
+    search.waiters += 1
+    try:
+        # Shielded: one day's tool timeout must not cancel the query another day awaits.
+        return await asyncio.shield(search.task)
+    finally:
+        search.waiters -= 1
+        if not search.waiters and not search.task.done():
+            # Nobody waits for it any more. Forgotten at once, not when the cancellation
+            # completes: a day that sends the same search in between must start a new
+            # query, not await this one and get its CancelledError.
+            search.task.cancel()
+            _forget(state, key, search)
+
+
+def _forget(state: ResearchState, key: str, search: _Search) -> None:
+    """Drop the search, unless the key already belongs to a newer one."""
+    if state.searches.get(key) is search:
+        del state.searches[key]
+
+
+def _around(state: ResearchState) -> str:
+    return f"{state.start.lat:.5f},{state.start.lon:.5f}"
+
+
 def _search_outcome(state: ResearchState, places: list[Place], label: str) -> ToolOutcome:
     found = []
     for place in places:
-        if place.id in state.excluded:
+        if place.id in state.excluded or place.id in state.taken:
             continue
-        # setdefault keeps a record already enriched by get_place_details.
-        found.append(state.registry.setdefault(place.id, place))
+        # setdefault keeps a record already enriched by get_place_details. The model is
+        # shown the source's own record: a day's tool results must not depend on what the
+        # days researched beside it looked up first, or a rehearsed run stops replaying
+        # from the LLM cache.
+        state.registry.setdefault(place.id, place)
+        found.append(place)
     found.sort(key=lambda p: _distance_m(state.start, p))
     shown = [_compact(state, p) for p in found[:MAX_RESULTS_SHOWN]]
     payload: dict[str, Any] = {"found": len(found), "places": shown}
@@ -391,6 +469,10 @@ def _compact(state: ResearchState, place: Place) -> dict[str, Any]:
 def _lookup(state: ResearchState, place_id: str) -> Place:
     if place_id in state.excluded:
         raise ToolRejected(f"the traveller rejected '{place_id}'; choose another place")
+    if place_id in state.taken:
+        raise ToolRejected(
+            f"'{place_id}' is already in the route of another day of the trip; choose another place"
+        )
     place = state.registry.get(place_id)
     if place is None:
         raise ToolRejected(
@@ -420,15 +502,16 @@ def _same_place_on_shortlist(state: ResearchState, place: Place) -> Place | None
 
 def _missing_for_finish(state: ResearchState) -> list[str]:
     missing = []
+    usable = state.available().values()
     need = min_candidates(state.brief)
-    if len(state.shortlist) < need:
-        missing.append(f"the shortlist has {len(state.shortlist)} places, need at least {need}")
-    covered = {label.casefold() for c in state.shortlist.values() for label in c.interests}
+    if len(usable) < need:
+        missing.append(f"the shortlist has {len(usable)} places, need at least {need}")
+    covered = {label.casefold() for c in usable for label in c.interests}
     for interest in state.brief.interests:
         if interest.weight >= MUST_HAVE_WEIGHT and interest.label.casefold() not in covered:
             missing.append(f"no candidate for the interest '{interest.label}'")
     for wanted in state.brief.must_include:
-        if not any(names_place(wanted, c.place.name) for c in state.shortlist.values()):
+        if not any(names_place(wanted, c.place.name) for c in usable):
             missing.append(f"must_include '{wanted}' is not on the shortlist: search it by name")
     return missing
 

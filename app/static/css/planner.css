@@ -1,14 +1,20 @@
 /*
- * Прогулка — the planner page: composer and agent trace | map | itinerary.
+ * Прогулка — the journey planner: composer and agent trace | days | map | itinerary.
  *
  * Built on base.css: its tokens, buttons, chips, segmented control, toggle and slider.
- * What is here is the three-pane layout and the planner's own pieces: the folding
- * composer, the trace rows, the map markers and popups, and the timeline. The route
- * keeps the one terracotta accent (line, stop numbers, main button), so on a projector
- * the eye always lands on it; everything else stays white, near-white and ink.
+ * What is here is the layout and the planner's own pieces: the folding composer with
+ * its calendar, time window and microphone, the journey bar with the day tabs, the
+ * trace rows, the map markers and popups, and the timelines.
+ *
+ * Colour: terracotta stays the accent of the main action and of a one-day route. On a
+ * trip of several days each day wears its own colour (base.css's --day-N, set as --day
+ * on the element by dayColor() in planner-map.js), the same on its tab, its route and
+ * markers, its trace rows and its timeline, so «which day is this» is answered by
+ * colour first and by the day number next to it. Everything else stays white,
+ * near-white and ink.
  */
 
-/* ---------- layout: side | map | itinerary ---------- */
+/* ---------- layout: side | map | itinerary, with the journey bar over map and itinerary ---------- */
 
 .planner {
   display: grid;
@@ -17,7 +23,12 @@
   min-height: 0;
   /* trace and itinerary keep readable widths, the map takes whatever is left */
   grid-template-columns: clamp(340px, 27vw, 450px) minmax(0, 1fr) clamp(350px, 28vw, 480px);
+  grid-template-rows: minmax(0, 1fr);
   grid-template-areas: "side map plan";
+}
+.planner.has-journey {
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "side bar bar" "side map plan";
 }
 
 /* narrower screens: the itinerary moves under the map */
@@ -27,12 +38,17 @@
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas: "side map" "side plan";
   }
+  .planner.has-journey {
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "side bar" "side map" "side plan";
+  }
 }
 
 /* phones: one column, the page scrolls instead of the panes */
 @media (max-width: 999px) {
   body.is-app { display: block; height: auto; }
   .planner { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "side" "map" "plan"; gap: 12px; padding: 12px; }
+  .planner.has-journey { grid-template-rows: auto; grid-template-areas: "side" "bar" "map" "plan"; }
   .side { overflow: visible; }
   .trace { min-height: 420px; max-height: 75vh; }
   .map-wrap { height: 62vh; min-height: 320px; }
@@ -77,6 +93,29 @@
 }
 .example:hover:not(:disabled) { border-color: var(--ink); }
 
+/* «Куда» and «Когда»: always open, they are the trip itself */
+.block {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+.block-title {
+  float: left; /* not drawn on the fieldset's border: a plain first row of the grid */
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--route-deep);
+}
+.where .field { gap: 4px; font-size: 0.88rem; font-weight: 500; color: var(--muted); }
+.where .input { min-height: 42px; padding: 8px 12px; font-size: 0.98rem; color: var(--ink); }
+.when > .field-hint { margin-top: -4px; }
+
 /* collapsible sections of the form */
 .drawer { border-top: 1px solid var(--rule); padding-top: 12px; }
 .drawer summary {
@@ -103,12 +142,7 @@
 .drawer[open] summary::before { transform: rotate(45deg); }
 .drawer summary:hover .drawer-title { color: var(--route-deep); }
 
-.refine-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin-top: 12px; }
-.refine-grid .field { gap: 4px; font-size: 0.85rem; font-weight: 500; color: var(--muted); }
-.refine-grid .wide { grid-column: 1 / -1; }
-.refine-grid .input { min-width: 0; min-height: 40px; padding: 7px 11px; font-size: 0.95rem; color: var(--ink); }
-
-/* «Настроить прогулку» */
+/* «Настроить путешествие» */
 .tune { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; margin-top: 14px; }
 .tune-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .tune-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -132,7 +166,16 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .profile-note { font-size: 0.88rem; color: var(--muted); }
 .profile-note a { font-weight: 500; }
 
-.composer-actions { display: flex; gap: 8px; }
+/* the button stays in reach while the long form scrolls under it */
+.composer-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+  padding-top: 10px;
+  background: linear-gradient(rgb(255 255 255 / 0), var(--card) 8px);
+}
 .composer-actions #build { flex: 1; }
 .replan-note { font-size: 0.84rem; color: var(--muted); text-align: center; }
 
@@ -157,6 +200,224 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 }
 .recap-chips { gap: 5px; }
 .recap-chips .chip { font-size: 0.84rem; }
+
+/* ---------- voice input (js/voice.js) ---------- */
+
+.dictation { position: relative; display: grid; min-width: 0; }
+.dictation.has-voice .textarea { padding-right: 56px; }
+.voice {
+  --level: 0;
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  pointer-events: none; /* the text box stays clickable around the button */
+}
+.voice > * { pointer-events: auto; }
+.voice-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--ink-soft);
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.08s linear;
+}
+.voice-btn:hover:not(:disabled) { border-color: var(--ink); color: var(--ink); }
+.voice-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+/* the louder the voice, the wider the ring: the traveller sees the microphone hears them */
+.voice[data-state="recording"] .voice-btn {
+  border-color: var(--route);
+  background: var(--route);
+  color: #fff;
+  box-shadow: 0 0 0 calc(3px + var(--level) * 12px) rgb(200 65 42 / 0.18);
+}
+.voice[data-state="recording"] .voice-icon rect { fill: currentColor; stroke: none; }
+/* waiting for the permission or the transcript: a ring turns around the still microphone */
+.voice[data-state="starting"] .voice-btn,
+.voice[data-state="transcribing"] .voice-btn { position: relative; color: var(--faint); pointer-events: none; }
+.voice[data-state="starting"] .voice-btn::after,
+.voice[data-state="transcribing"] .voice-btn::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px solid transparent;
+  border-top-color: var(--route);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.voice-status,
+.voice-timer {
+  min-width: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: var(--shadow-sm);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+.voice-status:empty,
+.voice-timer:empty { display: none; }
+/* while recording the counter says enough; the sentence is for screen readers */
+.voice[data-state="recording"] .voice-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.voice-timer { font: 600 0.8rem var(--mono); color: var(--route-deep); }
+.voice-timer::before { content: "●"; margin-right: 6px; animation: pulse 1.1s ease-in-out infinite; }
+.voice[data-state="error"] .voice-status { background: var(--red-tint); color: var(--red); font-weight: 500; border-radius: 10px; }
+@keyframes spin { to { transform: rotate(1turn); } }
+
+/* ---------- date range calendar (js/calendar.js) ---------- */
+
+.cal {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cal-title { font: 600 1.05rem/1.2 var(--serif); }
+.cal-nav {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: var(--ink-soft);
+}
+.cal-nav:hover:not(:disabled) { background: var(--paper-deep); color: var(--ink); }
+.cal-nav:disabled { opacity: 0.3; }
+.cal-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.cal-grid th { padding: 0 0 4px; font-size: 0.74rem; font-weight: 600; color: var(--muted); }
+.cal-grid th.is-weekend { color: var(--route-deep); }
+.cal-grid td { padding: 2px 0; text-align: center; }
+.cal-day {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 0.92rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  transition: background 0.12s, color 0.12s;
+}
+.cal-grid td.is-weekend .cal-day { color: var(--route-deep); }
+.cal-day:hover:not([aria-disabled="true"]) { background: var(--card); box-shadow: inset 0 0 0 1px var(--rule-strong); }
+.cal-day[aria-disabled="true"] { color: var(--faint) !important; cursor: not-allowed; }
+.cal-day.is-today::after {
+  content: "";
+  position: absolute;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* the range is a band from the first day (ink, like the start of a route) to the last (terracotta) */
+.cal-grid td.in-range { background: linear-gradient(var(--route-tint), var(--route-tint)) center / 100% 36px no-repeat; }
+.cal-grid td.is-preview { background: linear-gradient(var(--route-wash), var(--route-wash)) center / 100% 36px no-repeat; }
+.cal-grid td.in-range.is-from { background-size: 50% 36px; background-position: right center; }
+.cal-grid td.in-range.is-to { background-size: 50% 36px; background-position: left center; }
+.cal-grid td.is-from.is-to { background: none; }
+.cal-grid td.is-from .cal-day { background: var(--ink); color: #fff; }
+.cal-grid td.is-to .cal-day { background: var(--route); color: #fff; }
+.cal-grid td.is-preview.is-to .cal-day { background: var(--card); box-shadow: inset 0 0 0 2px var(--route); color: var(--route-deep); }
+.cal-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; }
+.cal-summary { font-weight: 600; font-size: 0.95rem; color: var(--ink); }
+.cal-clear {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.cal-clear:hover { background: var(--paper-deep); color: var(--ink); }
+
+/* ---------- daily time window (js/time-range.js) ---------- */
+
+.trange { --thumb: 24px; display: grid; gap: 4px; margin-top: 4px; }
+.trange-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.trange-label { font-size: 0.86rem; font-weight: 600; color: var(--ink); }
+.trange-value { display: flex; align-items: baseline; gap: 6px; }
+.trange-clock { font: 600 0.98rem var(--mono); color: var(--ink); }
+.trange-span { font: italic 500 1rem var(--serif); color: var(--route-deep); }
+.trange-track { position: relative; height: var(--thumb); cursor: pointer; touch-action: none; }
+/* under the window, the day's sky: dawn, noon, dusk, night */
+.trange-rail,
+.trange-fill { position: absolute; top: 50%; height: 8px; margin-top: -4px; border-radius: 999px; }
+.trange-rail {
+  left: calc(var(--thumb) / 2);
+  right: calc(var(--thumb) / 2);
+  background: linear-gradient(90deg, #f7e2cf, #fbf1dc 22%, #f3f0e8 48%, #f1e2d6 72%, #dcdce9 86%, #cfd3e3);
+}
+.trange-fill {
+  left: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--a));
+  width: calc((100% - var(--thumb)) * (var(--b) - var(--a)));
+  background: var(--route);
+}
+.trange-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: var(--thumb);
+  margin: 0;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: none; /* only the thumbs take the pointer; the track handles the rest */
+}
+.trange-track[data-top="start"] .is-start,
+.trange-track[data-top="end"] .is-end { z-index: 1; }
+.trange-input::-webkit-slider-runnable-track { height: var(--thumb); background: none; }
+.trange-input::-webkit-slider-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 2.5px solid var(--route);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(28 31 29 / 0.25);
+  cursor: grab;
+  pointer-events: auto;
+  -webkit-appearance: none;
+}
+.trange-input::-moz-range-track { background: none; }
+.trange-input::-moz-range-thumb {
+  width: 19px;
+  height: 19px;
+  border: 2.5px solid var(--route);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(28 31 29 / 0.25);
+  cursor: grab;
+  pointer-events: auto;
+}
+.trange-input:focus-visible { outline: none; }
+.trange-input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px var(--route-tint); }
+.trange-input:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 5px var(--route-tint); }
+.trange-scale { position: relative; height: 1.3em; font: 0.72rem var(--mono); color: var(--muted); }
+.trange-scale span { position: absolute; left: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--at)); transform: translateX(-50%); }
 
 /* ---------- agent trace ---------- */
 
@@ -245,9 +506,22 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 }
 .stop-run:hover:not(:disabled) { border-color: var(--red); background: var(--red-tint); color: var(--red); }
 
+/* «Только день 2 · Все дни» while one day is selected */
+.trace-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 -6px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+.trace-filter .btn { margin-left: auto; }
+
 .hint { padding: 18px; font-size: 0.95rem; color: var(--muted); }
 
-.trace-log {
+/* two classes: base.css resets ol[class], which outranks a single class */
+.trace .trace-log {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -256,6 +530,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 }
 
 .row {
+  position: relative;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 10px;
@@ -263,6 +538,35 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
   animation: rise 0.25s ease-out both;
 }
 .row-body { min-width: 0; overflow-wrap: anywhere; }
+
+/* a row about one day: a rail in the day's colour and the day's number on the badge */
+.row.has-day::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--day);
+  opacity: 0.75;
+}
+.row-mark { position: relative; align-self: start; display: grid; }
+.day-dot {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--day);
+  box-shadow: 0 0 0 2px var(--card);
+  font: 700 0.64rem/16px var(--mono);
+  color: #fff;
+  text-align: center;
+}
+.row.stage.has-day .stage-name { color: var(--day); }
 
 .badge {
   display: grid;
@@ -328,6 +632,24 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .brief-origin { font-size: 0.78rem; color: var(--muted); }
 .brief-group.is-walk .chip.is-interest { border-color: #eeb8a6; background: var(--card); }
 .brief-group.is-profile .chip.is-interest { border: 1px dashed #eeb8a6; background: var(--route-wash); }
+
+/* the plan of the days, as the agent wrote it */
+.outline-title { margin: -2px 0 8px; font: 600 1.12rem/1.3 var(--serif); color: var(--ink); }
+.outline-days { display: grid; gap: 8px; }
+.outline-days li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 9px; align-items: start; }
+.outline-num {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--day);
+  font: 700 0.74rem/1 var(--mono);
+  color: #fff;
+}
+.outline-theme { font-weight: 600; line-height: 1.35; color: var(--ink); }
+.outline-meta { font-size: 0.82rem; color: var(--muted); }
 
 .tool-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
 .tool-name { font: 600 0.86rem var(--mono); }
@@ -404,7 +726,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 }
 .row.plan-ready .row-body { font-weight: 600; color: var(--ink); }
 
-/* a saved trip's earlier runs */
+/* a saved journey's earlier runs */
 .row.history .row-body { display: grid; gap: 3px; }
 .history-meta { font-size: 0.8rem; color: var(--muted); }
 .history-text { font: italic 400 1rem/1.45 var(--serif); color: var(--ink); }
@@ -412,6 +734,98 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .history-reply b { color: var(--route-deep); }
 
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+/* ---------- journey bar: the trip's title and its days ---------- */
+
+.journey-bar {
+  grid-area: bar;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+  min-width: 0;
+  padding: 12px 12px 12px 22px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  animation: rise 0.3s ease-out both;
+}
+.journey-head { display: grid; gap: 3px; flex: 0 1 320px; min-width: 200px; }
+.journey-title { font: 600 1.4rem/1.15 var(--serif); letter-spacing: -0.01em; text-wrap: balance; }
+
+.day-tabs {
+  display: flex;
+  flex: 1 1 440px;
+  gap: 6px;
+  min-width: 0;
+  margin: -4px;
+  padding: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.day-swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--day); }
+/* «Все дни»: a little stack of every day's colour */
+.day-swatch.is-all { display: inline-flex; width: auto; height: auto; background: none; }
+.day-swatch.is-all i { width: 9px; height: 9px; border-radius: 50%; background: var(--day); box-shadow: 0 0 0 1.5px var(--card); }
+.day-swatch.is-all i + i { margin-left: -3px; }
+
+.day-tab {
+  --day: var(--ink);
+  position: relative;
+  flex: none;
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  width: 172px;
+  padding: 8px 12px 11px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  text-align: left;
+  color: var(--ink-soft);
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.day-tab.is-all { width: auto; min-width: 132px; }
+.day-tab:hover { border-color: var(--rule-strong); background: var(--card); }
+.day-tab[aria-selected="true"] { border-color: var(--day); background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
+/* the selected day is underlined with its own dotted route, like the nav's current page */
+.day-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 3px;
+  height: 4px;
+  background: radial-gradient(circle, var(--day) 1.6px, transparent 2.1px) 0 50% / 8px 4px repeat-x;
+}
+.day-tab-top { display: flex; align-items: center; gap: 7px; font-size: 0.9rem; white-space: nowrap; }
+.day-tab-top b { font-weight: 600; color: var(--ink); }
+.day-tab-date { font: 500 0.76rem var(--mono); color: var(--muted); }
+.day-tab-sub {
+  overflow: hidden;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.day-tab[data-status="failed"] .day-tab-sub { color: var(--red); }
+
+/* a day's progress while the agent works on it: on its tab and on its card */
+.day-tab[data-status="active"] .day-tab-sub::before,
+.day-card[data-status="active"] .day-card-progress::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 6px 1px 0;
+  border-radius: 50%;
+  background: var(--day);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+.day-tab[data-status="done"] .day-tab-sub::before,
+.day-card[data-status="done"] .day-card-progress::before { content: "✓ "; color: var(--green); font-weight: 700; }
 
 /* ---------- map ---------- */
 
@@ -427,7 +841,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 #map { position: absolute; inset: 0; }
 .maplibregl-map { font: inherit; }
 
-.map-legend {
+.map-wrap .map-legend {
   position: absolute;
   z-index: 2;
   top: 12px;
@@ -450,7 +864,8 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .map-legend li { display: flex; align-items: center; gap: 6px; }
 .legend-mark { flex: none; width: 12px; height: 12px; border-radius: 50%; }
 .legend-mark.is-start { background: #fff; box-shadow: inset 0 0 0 3px var(--ink); }
-.legend-mark.is-stop { background: var(--route); }
+.legend-mark.is-stop { background: var(--day, var(--route)); }
+.legend-mark.is-daystart { background: #fff; box-shadow: inset 0 0 0 3px var(--ink-soft), inset 0 0 0 6px #fff; }
 .legend-mark.is-cand { border: 2px solid var(--route); background: #fff; }
 .legend-mark.is-ghost { width: 10px; height: 10px; border: 2px solid var(--muted); background: #fff; }
 
@@ -471,12 +886,13 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .map-fallback-detail:empty { display: none; }
 
 /* MapLibre moves the marker element with a transform, so the animations go on its children */
+.maplibregl-marker.pin-stop:not(.is-dim) { z-index: 1; }
 .maplibregl-marker:hover,
 .maplibregl-marker:focus-visible,
 .maplibregl-marker.is-hot { z-index: 2; }
 .pin { cursor: pointer; }
 .pin:focus-visible { outline: none; }
-.pin:focus-visible .pin-dot { outline: 3px solid var(--route); outline-offset: 2px; }
+.pin:focus-visible .pin-dot { outline: 3px solid var(--day, var(--route)); outline-offset: 2px; }
 .pin-dot {
   display: grid;
   place-items: center;
@@ -484,25 +900,32 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
   height: 34px;
   border: 2.5px solid #fff;
   border-radius: 50%;
-  background: var(--route);
+  background: var(--day, var(--route));
   box-shadow: 0 2px 8px rgb(28 31 29 / 0.3);
   font: 700 0.95rem/1 var(--sans);
   color: #fff;
-  transition: transform 0.15s, background 0.15s;
+  transition: transform 0.15s, background 0.15s, opacity 0.2s;
   animation: pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) both;
   animation-delay: calc(var(--i) * 90ms + 200ms);
 }
 .pin.is-hot .pin-dot { transform: scale(1.22); background: var(--ink); }
+/* another day's marker while one day is selected: still there, but quiet */
+.pin.is-dim .pin-dot { opacity: 0.35; transform: scale(0.8); box-shadow: none; }
+.pin.is-dim .pin-tip { display: none; }
 .pin-start .pin-dot { width: 30px; height: 30px; background: var(--ink); }
 .pin-start .pin-dot::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: #fff; }
+/* a day that starts in its own district, away from where the traveller stays */
+.pin-daystart { cursor: default; }
+.pin-daystart .pin-dot { width: 24px; height: 24px; border: 3px solid var(--day); background: #fff; }
+.pin-daystart .pin-dot::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--day); }
 /* a shortlisted place, before the optimizer has placed it */
 .pin-cand { cursor: default; }
 .pin-cand .pin-dot {
   width: 16px;
   height: 16px;
-  border: 2px solid var(--route);
+  border: 2px solid var(--day, var(--route));
   background: #fff;
-  box-shadow: 0 0 0 4px rgb(200 65 42 / 0.18);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--day, var(--route)) 18%, transparent);
   animation: pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) both, beacon 1.8s ease-out 0.5s 2;
 }
 /* shortlisted, but did not fit the time window or the walk */
@@ -515,8 +938,8 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
   animation: none;
 }
 @keyframes beacon {
-  0% { box-shadow: 0 0 0 0 rgb(200 65 42 / 0.45); }
-  100% { box-shadow: 0 0 0 14px rgb(200 65 42 / 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--day, var(--route)) 45%, transparent); }
+  100% { box-shadow: 0 0 0 14px transparent; }
 }
 
 /* the name on hover: a text node, never markup */
@@ -561,6 +984,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .popup h3 { font: 600 1.15rem/1.25 var(--serif); }
 .popup p { color: var(--ink-soft); }
 .popup .popup-meta { font: 500 0.78rem var(--mono); color: var(--muted); }
+.popup .popup-meta::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--day, var(--ink)); }
 .popup .source { font-weight: 500; }
 
 .maplibregl-ctrl-group:not(:empty) { border-radius: 10px; box-shadow: var(--shadow); }
@@ -586,8 +1010,13 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
   border-bottom: 1px solid var(--rule);
   animation: rise 0.35s ease-out both;
 }
+.plan-head .eyebrow { color: var(--day, var(--route-deep)); }
 .plan-title { font: 600 1.75rem/1.15 var(--serif); letter-spacing: -0.01em; text-wrap: balance; }
 .plan-summary { color: var(--ink-soft); }
+/* what the plan of the days asked of this day */
+.day-focus { font-size: 0.9rem; color: var(--ink-soft); }
+.day-focus span + span::before { content: "·"; margin: 0 7px; color: var(--faint); }
+.day-focus span:first-child { font-weight: 500; }
 
 .stats { display: flex; flex-wrap: wrap; row-gap: 10px; margin-top: 4px; }
 .stat {
@@ -610,7 +1039,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .violation.is-error { background: var(--red-tint); color: var(--red); }
 
 /* timeline: a vertical rail with the numbered stops threaded on it */
-.timeline { position: relative; margin-top: 18px; }
+.plan .timeline { position: relative; margin-top: 18px; }
 .timeline::before {
   content: "";
   position: absolute;
@@ -685,7 +1114,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
   margin-top: 8px;
   border: 2.5px solid var(--card);
   border-radius: 50%;
-  background: var(--route);
+  background: var(--day, var(--route));
   box-shadow: 0 1px 4px rgb(28 31 29 / 0.22);
   font-weight: 700;
   color: #fff;
@@ -702,7 +1131,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .stop:hover .stop-body,
 .stop.is-hot .stop-body { border-color: var(--rule); background: var(--paper); }
 .stop.is-hot .stop-num { transform: scale(1.12); background: var(--ink); }
-.stop.is-active .stop-body { border-color: var(--route); background: var(--route-wash); }
+.stop.is-active .stop-body { border-color: var(--day, var(--route)); background: color-mix(in srgb, var(--day, var(--route)) 5%, var(--card)); }
 
 .stop-meta { display: flex; align-items: center; gap: 10px; }
 .kind {
@@ -750,6 +1179,84 @@ span.source { color: var(--muted); }
 }
 .dropped b { color: var(--ink-soft); }
 
+/* «← День 1 · День 3 →» under a day */
+.day-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--rule); }
+.day-step {
+  display: grid;
+  gap: 1px;
+  padding: 9px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.day-step.is-next { text-align: right; }
+.day-step small { font-size: 0.78rem; color: var(--muted); }
+.day-step span { font-weight: 600; color: var(--day); }
+.day-step:hover { border-color: var(--day); background: var(--paper); }
+
+/* «Все дни», and the plan of the days while they are researched: one card per day */
+.plan .days { display: grid; gap: 10px; margin-top: 18px; }
+.day-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 16px 14px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--card);
+  animation: rise 0.35s ease-out both;
+  animation-delay: calc(var(--i) * 70ms);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+/* the day's colour runs down the card as a dotted route */
+.day-card::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 14px;
+  bottom: 14px;
+  width: 4px;
+  background: radial-gradient(circle, var(--day) 1.7px, transparent 2.2px) 50% 0 / 4px 8px repeat-y;
+}
+.day-card:has(.day-card-open):hover,
+.day-card.is-selected { border-color: var(--day); box-shadow: var(--shadow); }
+.day-card:has(.day-card-open:focus-visible) { outline: 3px solid var(--day); outline-offset: 2px; }
+.day-num { font: 500 2.5rem/0.9 var(--serif); color: var(--day); text-align: center; font-variant-numeric: lining-nums; }
+.day-card-body { display: grid; gap: 3px; min-width: 0; }
+.day-card-meta { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 8px; font-size: 0.86rem; color: var(--muted); }
+.day-card-meta time { font: 500 0.8rem var(--mono); white-space: nowrap; }
+.day-card-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--day);
+  text-align: left;
+}
+.day-card-open:focus-visible { outline: none; }
+/* the whole card opens its day; the button stays the one thing a screen reader meets */
+.day-card-open::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.day-card-title { font: 600 1.18rem/1.25 var(--serif); }
+.day-card-theme { font-size: 0.88rem; color: var(--ink-soft); }
+.day-card-stats { font-size: 0.84rem; color: var(--muted); }
+.day-card-stops {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 3px;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+.day-card-warn { font-size: 0.84rem; font-weight: 500; color: var(--amber); }
+.day-card-progress { margin-top: 4px; font-size: 0.88rem; font-weight: 500; color: var(--ink-soft); }
+.day-card[data-status="failed"] .day-card-progress,
+.day-card[data-status="failed"] .day-card-title { color: var(--red); }
+
 /* ---------- feedback ---------- */
 
 .feedback {
@@ -759,11 +1266,24 @@ span.source { color: var(--muted); }
   border-top: 1px solid var(--rule);
   background: var(--paper);
 }
-.feedback label { font: 600 1.05rem/1.2 var(--serif); }
+.feedback-title { font: 600 1.05rem/1.2 var(--serif); }
+.feedback-edit,
+.feedback-pick { display: grid; gap: 8px; }
 .feedback-row { display: flex; align-items: stretch; gap: 10px; }
-.feedback .textarea { flex: 1; min-width: 0; min-height: 0; padding: 8px 12px; resize: none; }
+.feedback-row .dictation { flex: 1; }
+.feedback .textarea { min-height: 0; height: 100%; padding: 8px 12px; resize: none; }
+.feedback .dictation.has-voice .textarea { padding-right: 52px; }
+.feedback .voice { right: 6px; bottom: 6px; left: 6px; }
+.feedback .voice-btn { width: 34px; height: 34px; }
 .feedback .btn { min-height: auto; }
 .feedback-hint { font-size: 0.8rem; color: var(--muted); }
+/* a phone has no room for the box and the button side by side */
+@media (max-width: 520px) {
+  .feedback-row { flex-direction: column; }
+  .feedback .textarea { min-height: 4.4em; }
+  .feedback .btn { min-height: 44px; }
+}
+button.pick-day { min-height: 36px; padding: 5px 13px; font-size: 0.9rem; }
 
 .reply {
   padding: 8px 12px;

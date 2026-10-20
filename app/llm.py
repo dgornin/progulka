@@ -2,7 +2,9 @@
 
 Three jobs, all of them things a framework would hide from you:
 - `chat`: one call with optional tools; retries on rate limits and on OpenRouter's
-  "200 with an error body" quirk; counts tokens, calls and cost for the run. The
+  "200 with an error body" quirk; counts tokens, calls and cost for the run. A
+  message may carry content parts (audio for app/agent/speech.py), and one call may
+  go to another model than the configured one: the counters stay with the run. The
   SDK's own retries are off: retries inside retries multiplied the wait on a hung
   provider, so this is the only layer and one call waits at most MAX_ATTEMPTS
   request timeouts plus the backoff.
@@ -125,9 +127,10 @@ class LLM:
         temperature: float | None = None,
         max_tokens: int = 2500,
         response_format: dict[str, Any] | None = None,
+        model: str | None = None,
     ) -> ChatTurn:
         request: dict[str, Any] = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": messages,
             "temperature": self.temperature if temperature is None else temperature,
             "max_tokens": max_tokens,

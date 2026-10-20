@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Новая прогулка — Прогулка</title>
+  <title>Новое путешествие — Прогулка</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23c8412a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,48 +34,54 @@
 
         <div class="composer-body" id="composer-body">
           <div class="composer-head">
-            <label class="composer-label" for="request">Опишите прогулку</label>
-            <p class="field-hint" id="request-hint">Как другу: город, время, что любите. Если город указан ниже или в профиле, можно ничего не писать.</p>
+            <label class="composer-label" for="request">Куда едете и что любите?</label>
+            <p class="field-hint" id="request-hint">Как другу: что любите, что не надо, с кем едете. Город, даты и время — ниже, писать их не нужно.</p>
           </div>
-          <textarea class="textarea" id="request" name="request" rows="4" maxlength="2000"
-                    aria-describedby="request-hint request-error"
-                    placeholder="Суббота в Петербурге, с 11 до 18. Люблю конструктивизм и стрит-арт, хочу попробовать местную уличную еду, музеи не надо. Старт от Московского вокзала."></textarea>
+          <div class="dictation" id="request-box">
+            <textarea class="textarea" id="request" name="request" rows="4" maxlength="2000"
+                      aria-describedby="request-hint request-error"
+                      placeholder="Еду в Петербург на выходные, первый раз. Люблю конструктивизм и стрит-арт, хочу попробовать местную уличную еду, музеи не надо."></textarea>
+          </div>
           <p class="field-error" id="request-error" aria-live="polite"></p>
           <div class="examples">
             <span>Например:</span>
             <button type="button" class="example"
-                    data-example="Суббота в Петербурге, с 11 до 18. Люблю конструктивизм и стрит-арт, хочу попробовать местную уличную еду, музеи не надо. Старт от Московского вокзала.">Петербург · конструктивизм</button>
+                    data-example="Три дня в Петербурге, первый раз в городе. Люблю конструктивизм, стрит-арт и дворы, хочу попробовать местную уличную еду, музеи не надо. Живу у Московского вокзала.">Петербург · 3 дня</button>
             <button type="button" class="example"
-                    data-example="Воскресенье в Москве с 10 до 16, гуляем с ребёнком 8 лет. Парки, что-нибудь про науку и где вкусно пообедать, без долгих переходов. Начнём от метро «Парк культуры».">Москва · с ребёнком</button>
+                    data-example="Два дня в Москве с ребёнком 8 лет: парки, что-нибудь про науку и где вкусно пообедать, без долгих переходов. Остановились у метро «Парк культуры».">Москва · с ребёнком</button>
             <button type="button" class="example"
-                    data-example="Казань, один день с 12 до 20. Татарская кухня, мечети и старинные купеческие дома, а вечером — красивый вид на закат. Старт у Кремля.">Казань · кухня и закат</button>
+                    data-example="Казань, один день проездом: татарская кухня, мечети и старинные купеческие дома, а вечером — красивый вид на закат. Старт у Кремля.">Казань · проездом</button>
           </div>
 
-          <details class="drawer" id="tune" open>
+          <fieldset class="block where">
+            <legend class="block-title">Куда</legend>
+            <label class="field">Город <input class="input" name="city" autocomplete="off" maxlength="100" placeholder="Санкт-Петербург"></label>
+            <label class="field">Где живёте или откуда стартуете
+              <input class="input" name="start_point" autocomplete="off" maxlength="200" placeholder="Отель, адрес или вокзал">
+            </label>
+          </fieldset>
+
+          <fieldset class="block when">
+            <legend class="block-title">Когда</legend>
+            <p class="field-hint">Первый день, затем последний — до 7 дней. Без дат агент возьмёт их из запроса.</p>
+            <div id="calendar"></div>
+            <div id="time-window"></div>
+          </fieldset>
+
+          <details class="drawer" id="tune">
             <summary>
-              <span class="drawer-title">Настроить прогулку</span>
+              <span class="drawer-title">Настроить путешествие</span>
               <span class="count" id="tune-count" hidden></span>
             </summary>
             <div class="tune" id="tune-body"></div>
           </details>
 
-          <details class="drawer">
-            <summary><span class="drawer-title">Уточнить</span></summary>
-            <div class="refine-grid">
-              <label class="field">Город <input class="input" name="city" autocomplete="off" maxlength="100" placeholder="Санкт-Петербург"></label>
-              <label class="field">Дата <input class="input" name="date" type="date"></label>
-              <label class="field">Начало <input class="input" name="start_time" type="time"></label>
-              <label class="field">Конец <input class="input" name="end_time" type="time"></label>
-              <label class="field wide">Точка старта <input class="input" name="start_point" autocomplete="off" maxlength="200" placeholder="Московский вокзал"></label>
-            </div>
-          </details>
-
           <p class="profile-note" id="profile-note"></p>
           <div class="composer-actions">
-            <button class="btn btn-primary btn-lg" id="build" type="submit" disabled>Построить маршрут</button>
+            <button class="btn btn-primary btn-lg" id="build" type="submit" data-run-lock disabled>Построить путешествие</button>
             <button class="btn btn-ghost btn-lg" id="cancel-edit" type="button" hidden>Отмена</button>
           </div>
-          <p class="replan-note" id="replan-note" hidden>Текущий маршрут останется в «Моих прогулках».</p>
+          <p class="replan-note" id="replan-note" hidden>Текущее путешествие останется в «Моих путешествиях».</p>
         </div>
       </form>
 
@@ -90,14 +96,23 @@
             <p class="status" id="status" aria-live="polite"></p>
             <button class="btn btn-sm stop-run" id="stop" type="button" hidden>Остановить агента</button>
           </div>
+          <p class="trace-filter" id="trace-filter" hidden></p>
         </div>
-        <p class="hint" id="trace-hint">Здесь будет видно, как агент работает: какие источники спрашивает,
-          что находит, какие места берёт в маршрут и почему.</p>
+        <p class="hint" id="trace-hint">Здесь будет видно, как агент работает: сначала делит город по дням,
+          затем для каждого дня ищет места — какие источники спрашивает, что находит и почему берёт в маршрут.</p>
         <ol class="trace-log" id="log"></ol>
       </section>
     </aside>
 
-    <section class="map-wrap" aria-label="Карта маршрута">
+    <section class="journey-bar" id="journey-bar" aria-labelledby="journey-title" hidden>
+      <div class="journey-head">
+        <p class="eyebrow" id="journey-meta"></p>
+        <h1 class="journey-title" id="journey-title"></h1>
+      </div>
+      <div class="day-tabs" id="day-tabs" role="tablist" aria-label="Дни путешествия"></div>
+    </section>
+
+    <section class="map-wrap" aria-label="Карта путешествия">
       <div id="map"></div>
       <ul class="map-legend" id="map-legend" hidden></ul>
       <div class="map-fallback" id="map-fallback" hidden></div>
@@ -107,13 +122,18 @@
       <div class="plan" id="plan"></div>
       <form class="feedback" id="feedback" hidden>
         <p class="reply" id="reply" hidden></p>
-        <label for="feedback-text">Что изменить?</label>
-        <div class="feedback-row">
-          <textarea class="textarea" id="feedback-text" name="feedback" rows="2" maxlength="1000"
-                    placeholder="Например: добавь кофейню после обеда"></textarea>
-          <button type="submit" class="btn btn-primary" id="rebuild">Перестроить</button>
+        <div class="feedback-pick" id="feedback-pick" hidden></div>
+        <div class="feedback-edit" id="feedback-edit">
+          <label class="feedback-title" for="feedback-text" id="feedback-label">Что изменить?</label>
+          <div class="feedback-row">
+            <div class="dictation" id="feedback-box">
+              <textarea class="textarea" id="feedback-text" name="feedback" rows="2" maxlength="1000"
+                        placeholder="Например: добавь кофейню после обеда"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary" id="rebuild" data-run-lock>Перестроить</button>
+          </div>
+          <p class="feedback-hint" id="feedback-hint">Агент продолжит с того же места: найденные места он помнит. ⌘/Ctrl + Enter — отправить.</p>
         </div>
-        <p class="feedback-hint">Агент продолжит с того же места: найденные места он помнит. ⌘/Ctrl + Enter — отправить.</p>
       </form>
     </section>
   </main>

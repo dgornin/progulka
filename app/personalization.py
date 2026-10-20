@@ -1,6 +1,6 @@
 """Deterministic merge of everything we know about the traveller into one TripBrief.
 
-Four sources can say how this walk should look, and they can disagree. The merge is
+Four sources can say how this trip should look, and they can disagree. The merge is
 code, not a prompt: the same inputs always give the same brief, and the rule can be
 stated in one line. Precedence, highest first:
 
@@ -24,7 +24,7 @@ reject any kind of place serving it. A lower layer gets what is left: its intere
 dropped only when a higher (or its own) avoid phrase rejects every kind serving it,
 so «без музеев» rules out «Музеи и галереи», but «без галерей» leaves «музеи».
 
-Feedback on a finished walk is the traveller's newest word, so it is one more layer
+Feedback on a planned day is the traveller's newest word, so it is one more layer
 on top of the brief (with_feedback): «добавь музей» lifts the profile's «не
 предлагать музеи», and «без парков» drops the profile's parks.
 
@@ -46,7 +46,7 @@ SOURCE_ORDER: dict[InterestSource, int] = {"request": 0, "walk": 1, "profile": 2
 
 
 def brief_overrides(form: dict[str, Any], prefs: WalkPreferences) -> dict[str, Any]:
-    """What the traveller set explicitly for this walk: it wins over the text."""
+    """What the traveller set explicitly for this trip: it wins over the text."""
     scalars = prefs.model_dump(include={"pace", "with_kids", "max_walk_km"}, exclude_none=True)
     return {**form, **scalars}
 

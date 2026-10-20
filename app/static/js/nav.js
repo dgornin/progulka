@@ -8,8 +8,8 @@ import { logout } from "./api.js";
 import { h, svg, toast } from "./ui.js";
 
 const LINKS = [
-  ["trips", "/app/trips", "Мои прогулки"],
-  ["new", "/app/new", "Новая прогулка"],
+  ["trips", "/app/trips", "Мои путешествия"],
+  ["new", "/app/new", "Новое путешествие"],
   ["profile", "/app/profile", "Профиль"],
   ["admin", "/app/admin", "Админ"],
 ];

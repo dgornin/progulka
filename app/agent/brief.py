@@ -6,6 +6,11 @@ depend on how the model reads the request: each field is the first value set in
 the form's overrides, the draft, the profile's defaults, the hard defaults (today,
 10:00, five hours, normal pace), followed by the sanity checks.
 
+Dates of a multi-day trip: the model reports the range as said ("с 24 по 28 октября"
+-> both dates, "5 дней" -> a count) and code turns it into date..date_to. The length
+said in the text survives a start date moved in the form's calendar: "5 дней" with
+the form's 1 November is 1-5 November. The cap on the length is the pipeline's.
+
 An empty request makes no LLM call at all: there is nothing to extract, and the
 form and the profile already say everything the brief needs. That walk is cheaper,
 faster and fully deterministic; its interests come from the panel and the profile
@@ -24,7 +29,7 @@ from app.models import Interest, LocalTime, Pace, TripBrief
 from app.profile import INTERESTS
 
 DEFAULT_START = dt.time(10, 0)
-DEFAULT_HOURS = 5.0
+DEFAULT_HOURS = 8.0  # 10:00–18:00, a travel day; the planner slider shows the same default
 LATEST_END = dt.time(23, 59)
 
 
@@ -36,9 +41,17 @@ class BriefDraft(BaseModel):
     )
     country: str | None = None
     language: Literal["ru", "en"] | None = None
-    date: dt.date | None = Field(None, description="YYYY-MM-DD, relative dates resolved")
-    start_time: LocalTime | None = Field(None, description="HH:MM")
-    end_time: LocalTime | None = Field(None, description="HH:MM")
+    date: dt.date | None = Field(
+        None, description="YYYY-MM-DD, the first day of the trip, relative dates resolved"
+    )
+    date_to: dt.date | None = Field(
+        None, description="YYYY-MM-DD, the last day when the request names an end date"
+    )
+    days: int | None = Field(
+        None, ge=1, description="Only when the length is a count of days: '5 дней' -> 5"
+    )
+    start_time: LocalTime | None = Field(None, description="HH:MM, daily")
+    end_time: LocalTime | None = Field(None, description="HH:MM, daily")
     duration_hours: float | None = Field(
         None, gt=0, le=14, description="Only when a length is given instead of an end time"
     )
@@ -61,6 +74,7 @@ class BriefOverrides(BaseModel):
 
     city: str | None = None
     date: dt.date | None = None
+    date_to: dt.date | None = None
     start_time: LocalTime | None = None
     end_time: LocalTime | None = None
     start_point: str | None = None
@@ -97,6 +111,7 @@ async def parse_brief(
         raise ValueError("the request does not name a city")
     # A date in the past is a misread weekday: there is nothing to plan for it.
     model_date = draft.date if draft.date and draft.date >= today else today
+    first = fixed.date or model_date
     start = fixed.start_time or draft.start_time or DEFAULT_START
     end = (
         fixed.end_time or draft.end_time or _add_hours(start, draft.duration_hours or DEFAULT_HOURS)
@@ -112,7 +127,8 @@ async def parse_brief(
         city=city,
         country=draft.country,
         language=draft.language or _detect_language(request_text),
-        date=fixed.date or model_date,
+        date=first,
+        date_to=_last_day(first, fixed.date_to, draft),
         start_time=start,
         end_time=end,
         start_point=fixed.start_point or draft.start_point,
@@ -133,6 +149,20 @@ async def _extract(llm: LLM, request_text: str, today: dt.date) -> BriefDraft:
     return await llm.structured(
         [{"role": "system", "content": system}, {"role": "user", "content": prompt}], BriefDraft
     )
+
+
+def _last_day(first: dt.date, fixed: dt.date | None, draft: BriefDraft) -> dt.date | None:
+    """The trip's last day, None for a one-day trip: the form's end date, else the
+    length the text gives (an end date or a count of days) counted from `first`."""
+    if fixed:
+        last = fixed
+    elif draft.date_to:
+        last = first + (draft.date_to - (draft.date or first))
+    elif draft.days:
+        last = first + dt.timedelta(days=draft.days - 1)
+    else:
+        return None
+    return last if last > first else None
 
 
 def _first[T](*values: T | None) -> T | None:

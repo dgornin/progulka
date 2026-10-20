@@ -1,25 +1,33 @@
-"""HTTP layer: pages, accounts, saved trips, and the agent's work streamed as NDJSON.
+"""HTTP layer: pages, accounts, saved journeys, voice input, and the agent's work as NDJSON.
 
-Each agent run (a new walk, or feedback on a saved one) runs the pipeline in a
-background task that pushes AgentEvents into a queue; the response streams them one
-JSON object per line, so the UI shows every tool call while the agent is still
-working. The run is saved before the final `plan` event, so the trip id in that event
-always points at a stored trip; `done` closes the stream with the run's LLM usage.
+Each agent run (a new journey, or feedback on one day of a saved one) runs the
+pipeline in a background task that pushes AgentEvents into a queue; the response
+streams them one JSON object per line, so the UI shows every tool call while the agent
+is still working. The run is saved before the final `journey` event, so the journey
+id in that event always points at a stored journey; `done` closes the stream with the
+run's LLM usage.
 
 The traveller's profile and recent memory facts go into every run; facts the run
-learned are stored and reported in the `plan` event.
+learned are stored and reported in the `journey` event.
+
+Voice input is recorded in the browser and sent here as a short WAV: an audio-capable
+LLM transcribes it (app/agent/speech.py), so it works in every browser, including
+those without the Web Speech API. The recording is checked before it costs a call.
 
 Pages are static HTML: each asks /api/me who is signed in and sends a stranger to
-/login. The API enforces access on its own, and every trip query is scoped to its owner.
+/login. The API enforces access on its own, and every journey query is scoped to its owner.
 
 Run locally:   uvicorn app.main:app --reload
 Run in Docker: docker compose up --build
 """
 
 import asyncio
+import base64
+import io
 import logging
 import re
 import time
+import wave
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -34,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.types import Scope
 
+from app.agent.speech import transcribe
 from app.agent.tools import tool_schemas
 from app.auth import (
     AdminDep,
@@ -47,29 +56,30 @@ from app.auth import (
 )
 from app.config import settings
 from app.db import connect, create_schema
-from app.limits import Limits, SlidingWindow
+from app.limits import BUDGET_SPENT, HOUR_S, Limits, SlidingWindow
 from app.llm import LLM, LLMError
-from app.models import AgentEvent, Emit
+from app.models import AgentEvent, Emit, Stop
 from app.pipeline import (
     EMPTY_REQUEST,
     FeedbackRequest,
+    Journey,
     PipelineError,
     PlanRequest,
-    TripRun,
-    apply_feedback,
+    apply_day_feedback,
     has_place,
-    plan_trip,
+    plan_journey,
 )
 from app.profile import Profile, catalog
 from app.store import (
-    AdminTrip,
+    AdminJourney,
     AdminUser,
     HistoryEntry,
+    JourneyDetail,
+    JourneySummary,
     MemoryOut,
     Store,
-    TripDetail,
-    TripSummary,
     UserOut,
+    journey_view,
     today_start,
 )
 
@@ -82,9 +92,13 @@ MEMORY_IN_CONTEXT = 20  # newest facts the agent sees; older ones stay in the pr
 # 00:00 and 03:00 MSK the server still says yesterday. No DST, so a fixed offset.
 MOSCOW = timezone(timedelta(hours=3))
 LOGIN_FAILURES, LOGINS, REGISTRATIONS, AUTH_WINDOW_S = 10, 100, 20, 300.0  # per address
-NO_REQUEST_TEXT = "По анкете и настройкам прогулки"
-TRIP_NOT_FOUND = "Маршрут не найден"
-TRIP_BUSY = "Маршрут уже перестраивается"
+TRANSCRIPTIONS_PER_HOUR = 30  # per address: a minute of speech each, a few minutes of talk
+# What the recorder in static/js/voice.js sends: 16 kHz mono 16-bit WAV, up to a minute.
+AUDIO_RATE, MAX_AUDIO_S, MAX_AUDIO_BYTES = 16_000, 60, 2_500_000
+NO_REQUEST_TEXT = "По анкете и настройкам путешествия"
+JOURNEY_NOT_FOUND = "Путешествие не найдено"
+DAY_NOT_FOUND = "В этом путешествии нет такого дня"
+JOURNEY_BUSY = "Путешествие уже перестраивается"
 TOO_MANY_ATTEMPTS = "Слишком много попыток, подождите несколько минут"
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 DEMO_PROFILE = Profile(
@@ -103,9 +117,12 @@ limits = Limits(
 login_failures = SlidingWindow(LOGIN_FAILURES, AUTH_WINDOW_S)
 logins = SlidingWindow(LOGINS, AUTH_WINDOW_S)
 registrations = SlidingWindow(REGISTRATIONS, AUTH_WINDOW_S)
-# Trips with a run in progress. A second feedback or a delete is refused, not queued:
-# a plain set, not per-trip locks, because nothing ever waits for a trip.
-busy_trips: set[str] = set()
+transcriptions = SlidingWindow(TRANSCRIPTIONS_PER_HOUR, HOUR_S)
+# Journeys with a run in progress. A second feedback or a delete is refused, not
+# queued: a plain set, not per-journey locks, because nothing ever waits for a journey.
+# Feedback on one day locks the whole journey: the other days' stops are what that
+# run must not take, and a parallel run on another day could take the same place.
+busy_journeys: set[str] = set()
 
 
 @asynccontextmanager
@@ -137,8 +154,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Прогулка",
-    description="LLM agent that plans a walking route through real places in a city.",
-    version="0.2.0",
+    description="LLM agent that plans a traveller's walks in an unfamiliar city, one route "
+    "a day, through real places.",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -197,7 +215,7 @@ async def trips_page() -> FileResponse:
 
 
 @app.get("/app/new", include_in_schema=False)
-@app.get("/app/trips/{trip_id}", include_in_schema=False)
+@app.get("/app/trips/{journey_id}", include_in_schema=False)
 async def planner_page() -> FileResponse:
     return _page("planner.html")
 
@@ -346,26 +364,76 @@ async def forget(fact_id: int, user: UserDep, store: StoreDep) -> Response:
     return Response(status_code=204)
 
 
-@app.get("/api/trips")
-async def trips(user: UserDep, store: StoreDep) -> list[TripSummary]:
-    return await store.list_trips(user.id)
+@app.get("/api/journeys")
+async def journeys(user: UserDep, store: StoreDep) -> list[JourneySummary]:
+    return await store.list_journeys(user.id)
 
 
-@app.get("/api/trips/{trip_id}")
-async def trip(trip_id: str, user: UserDep, store: StoreDep) -> TripDetail:
-    detail = await store.get_trip(user.id, trip_id)
+@app.get("/api/journeys/{journey_id}")
+async def journey(journey_id: str, user: UserDep, store: StoreDep) -> JourneyDetail:
+    detail = await store.get_journey(user.id, journey_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail=TRIP_NOT_FOUND)
+        raise HTTPException(status_code=404, detail=JOURNEY_NOT_FOUND)
     return detail
 
 
-@app.delete("/api/trips/{trip_id}", status_code=204)
-async def delete_trip(trip_id: str, user: UserDep, store: StoreDep) -> Response:
-    if trip_id in busy_trips:
-        raise HTTPException(status_code=409, detail=TRIP_BUSY)
-    if not await store.delete_trip(user.id, trip_id):
-        raise HTTPException(status_code=404, detail=TRIP_NOT_FOUND)
+@app.delete("/api/journeys/{journey_id}", status_code=204)
+async def delete_journey(journey_id: str, user: UserDep, store: StoreDep) -> Response:
+    if journey_id in busy_journeys:
+        raise HTTPException(status_code=409, detail=JOURNEY_BUSY)
+    if not await store.delete_journey(user.id, journey_id):
+        raise HTTPException(status_code=404, detail=JOURNEY_NOT_FOUND)
     return Response(status_code=204)
+
+
+class TranscribeRequest(BaseModel):
+    audio: str  # base64 of a WAV file
+
+
+@app.post("/api/transcribe")
+async def transcribe_speech(
+    body: TranscribeRequest, request: Request, _user: UserDep
+) -> dict[str, str]:
+    """Voice input: a recording in, its transcript out, for the request or feedback box."""
+    client = _client(request)
+    if transcriptions.full(client):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Не больше {TRANSCRIPTIONS_PER_HOUR} голосовых вводов в час с одного адреса",
+        )
+    if limits.out_of_budget():
+        raise HTTPException(status_code=429, detail=BUDGET_SPENT)
+    _check_recording(body.audio)
+    transcriptions.add(client)
+    llm: LLM = request.app.state.llm.for_run()
+    try:
+        text, cost_usd = await transcribe(llm, body.audio)
+    except PipelineError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    limits.spend(cost_usd)
+    return {"text": text}
+
+
+def _check_recording(audio: str) -> None:
+    """Refuse what the recorder never sends before it costs an LLM call: too long or too
+    big (413); not base64, not 16 kHz mono 16-bit WAV, or empty (422)."""
+    too_long = HTTPException(status_code=413, detail="Запись длиннее минуты")
+    if len(audio) > (MAX_AUDIO_BYTES + 2) // 3 * 4:  # base64 of MAX_AUDIO_BYTES
+        raise too_long
+    try:
+        with wave.open(io.BytesIO(base64.b64decode(audio, validate=True))) as wav:
+            frames = wav.getnframes()
+            pcm = (wav.getnchannels(), wav.getsampwidth(), wav.getframerate())
+    # base64's binascii.Error is a ValueError; wave raises a bare RuntimeError for a
+    # chunk whose size runs past the file.
+    except (ValueError, wave.Error, EOFError, RuntimeError) as e:
+        raise HTTPException(status_code=422, detail="Запись не похожа на WAV") from e
+    if pcm != (1, 2, AUDIO_RATE):
+        raise HTTPException(status_code=422, detail="Нужна запись WAV 16 кГц, моно, 16 бит")
+    if not frames:
+        raise HTTPException(status_code=422, detail="Запись пустая")
+    if frames > MAX_AUDIO_S * AUDIO_RATE:
+        raise too_long
 
 
 # --- admin ---
@@ -390,8 +458,9 @@ async def admin_users(_admin: AdminDep, store: StoreDep) -> list[AdminUser]:
 
 
 @app.get("/api/admin/trips")
-async def admin_trips(_admin: AdminDep, store: StoreDep) -> list[AdminTrip]:
-    return await store.admin_trips()
+async def admin_journeys(_admin: AdminDep, store: StoreDep) -> list[AdminJourney]:
+    """The newest journeys; the path says trips, like the cabinet's /app/trips."""
+    return await store.admin_journeys()
 
 
 # --- agent runs ---
@@ -399,7 +468,7 @@ async def admin_trips(_admin: AdminDep, store: StoreDep) -> list[AdminTrip]:
 
 @dataclass
 class Outcome:
-    trip_run: TripRun
+    journey: Journey
     reply: str | None
     learned: list[str]  # facts that were new to the traveller's memory
 
@@ -418,57 +487,71 @@ async def plan(
 
     async def job(llm: LLM, emit: Emit) -> Outcome:
         today = settings.today or datetime.now(MOSCOW).date()
-        trip_run = await plan_trip(req, llm, emit, today=today, profile=profile, memory=facts)
+        journey = await plan_journey(req, llm, emit, today=today, profile=profile, memory=facts)
         entry = HistoryEntry(
             kind="plan", text=req.request or NO_REQUEST_TEXT, cost_usd=llm.usage.cost_usd
         )
-        await store.create_trip(user.id, trip_run, req.request, req.preferences, entry)
-        learned = await store.add_memory(user.id, trip_run.learned, source_trip_id=trip_run.id)
-        return Outcome(trip_run, None, learned)
+        await store.create_journey(user.id, journey, req.request, req.preferences, entry)
+        # A fact points at the day it was learned on; the request of a journey speaks
+        # for all its days, so its facts point at the first.
+        learned = await store.add_memory(
+            user.id, journey.learned, source_trip_id=journey.days[0].id
+        )
+        return Outcome(journey, None, learned)
 
     return _stream(job, request)
 
 
-@app.post("/api/trips/{trip_id}/feedback")
+@app.post("/api/journeys/{journey_id}/days/{index}/feedback")
 async def feedback(
-    trip_id: str, req: FeedbackRequest, request: Request, user: UserDep, store: StoreDep
+    journey_id: str,
+    index: int,
+    req: FeedbackRequest,
+    request: Request,
+    user: UserDep,
+    store: StoreDep,
 ) -> StreamingResponse:
     # Taken before the first await: a second request must not load the state this run
-    # is about to replace and then overwrite its result. The run frees the trip when it
-    # ends; until the run starts, this handler frees it on any failure.
-    if trip_id in busy_trips:
-        raise HTTPException(status_code=409, detail=TRIP_BUSY)
-    busy_trips.add(trip_id)
+    # is about to replace and then overwrite its result. The run frees the journey when
+    # it ends; until the run starts, this handler frees it on any failure.
+    if journey_id in busy_journeys:
+        raise HTTPException(status_code=409, detail=JOURNEY_BUSY)
+    busy_journeys.add(journey_id)
     try:
-        # From the database, not process memory: a trip from last week, or from before a
-        # restart, is continued exactly where its last run stopped.
-        trip_run = await store.load_trip_run(user.id, trip_id)
-        if trip_run is None:
-            raise HTTPException(status_code=404, detail=TRIP_NOT_FOUND)
+        # From the database, not process memory: a journey from last week, or from
+        # before a restart, is continued exactly where its last run stopped.
+        journey = await store.load_journey(user.id, journey_id)
+        if journey is None:
+            raise HTTPException(status_code=404, detail=JOURNEY_NOT_FOUND)
+        if not 0 <= index < len(journey.days):
+            raise HTTPException(status_code=404, detail=DAY_NOT_FOUND)
+        day = journey.days[index]
+        stops = day.plan.stops if day.plan else []
         # «Убрать» from a stale tab, for a stop an earlier run already removed: nothing
         # to do, and refused before it uses up a run.
-        stops = trip_run.plan.stops if trip_run.plan else []
         if not req.feedback.strip() and not any(
             stop.place.id in req.exclude_place_ids for stop in stops
         ):
             raise HTTPException(status_code=409, detail="Этого места уже нет в маршруте")
         profile, facts = await _traveller(store, user.id)
-        text = _feedback_text(req, trip_run)
+        text = _feedback_text(req, stops)
 
         async def job(llm: LLM, emit: Emit) -> Outcome:
-            updated, reply = await apply_feedback(
-                trip_run, req, llm, emit, profile=profile, memory=facts
+            updated, reply = await apply_day_feedback(
+                journey, index, req, llm, emit, profile=profile, memory=facts
             )
             entry = HistoryEntry(
-                kind="feedback", text=text, reply=reply, cost_usd=llm.usage.cost_usd
+                kind="feedback", day=index, text=text, reply=reply, cost_usd=llm.usage.cost_usd
             )
-            await store.update_trip(user.id, updated, entry)
-            learned = await store.add_memory(user.id, updated.learned, source_trip_id=trip_id)
+            await store.update_journey(user.id, updated, entry)
+            learned = await store.add_memory(
+                user.id, updated.learned, source_trip_id=updated.days[index].id
+            )
             return Outcome(updated, reply, learned)
 
-        return _stream(job, request, trip_id=trip_id)
+        return _stream(job, request, journey_id=journey_id)
     except BaseException:
-        busy_trips.discard(trip_id)
+        busy_journeys.discard(journey_id)
         raise
 
 
@@ -476,11 +559,10 @@ async def _traveller(store: Store, user_id: int) -> tuple[Profile, list[str]]:
     return await store.get_profile(user_id), await store.memory_texts(user_id, MEMORY_IN_CONTEXT)
 
 
-def _feedback_text(req: FeedbackRequest, trip_run: TripRun) -> str:
+def _feedback_text(req: FeedbackRequest, stops: list[Stop]) -> str:
     """The history line of a feedback run; the «Убрать» button sends no text, only ids."""
     if text := req.feedback.strip():
         return text
-    stops = trip_run.plan.stops if trip_run.plan else []
     names = [stop.place.name for stop in stops if stop.place.id in req.exclude_place_ids]
     return "Убрать: " + ", ".join(names)
 
@@ -490,8 +572,8 @@ def _client(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _stream(job: Job, request: Request, trip_id: str | None = None) -> StreamingResponse:
-    """Start the run in the background and stream its events; it frees `trip_id` at the end."""
+def _stream(job: Job, request: Request, journey_id: str | None = None) -> StreamingResponse:
+    """Start the run in the background and stream its events; it frees `journey_id` at the end."""
     refusal = limits.admit(_client(request))
     if refusal:
         raise HTTPException(status_code=429, detail=refusal)
@@ -505,15 +587,14 @@ def _stream(job: Job, request: Request, trip_id: str | None = None) -> Streaming
         started = time.monotonic()
         try:
             outcome = await job(llm, emit)
-            plan = outcome.trip_run.plan
             data: dict[str, Any] = {
-                "trip_id": outcome.trip_run.id,
-                "plan": plan.model_dump(mode="json") if plan else None,
+                "journey_id": outcome.journey.id,
+                "journey": journey_view(outcome.journey).model_dump(mode="json"),
                 "usage": llm.usage.as_dict(),
                 "reply": outcome.reply,
                 "learned": outcome.learned,
             }
-            await emit(AgentEvent(type="plan", data=data))
+            await emit(AgentEvent(type="journey", data=data))
         except PipelineError as e:
             await emit(AgentEvent(type="error", data={"message": str(e)}))
         except LLMError as e:
@@ -522,8 +603,8 @@ def _stream(job: Job, request: Request, trip_id: str | None = None) -> Streaming
             log.exception("pipeline failed")
             await emit(AgentEvent(type="error", data={"message": "Внутренняя ошибка, см. логи"}))
         finally:
-            if trip_id:
-                busy_trips.discard(trip_id)
+            if journey_id:
+                busy_journeys.discard(journey_id)
             limits.release(llm.usage.cost_usd)
             elapsed = round(time.monotonic() - started, 1)
             await emit(

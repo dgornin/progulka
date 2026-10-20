@@ -85,10 +85,26 @@ export function plural(n, one, few, many) {
   return many;
 }
 
-/** "2026-10-24" -> "сб, 24 октября" (noon avoids a timezone shifting the day). */
+/** A calendar date at local noon, so no timezone can shift it to the day before. */
+const noon = (isoDate) => new Date(`${isoDate.slice(0, 10)}T12:00:00`);
+
+/** "2026-10-24" -> "сб, 24 октября". */
 export function dayLabel(isoDate) {
-  const day = new Date(`${isoDate.slice(0, 10)}T12:00:00`);
-  return day.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" });
+  return noon(isoDate).toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" });
+}
+
+/**
+ * The dates of a journey: "24–28 октября", "30 октября – 2 ноября", one day as
+ * "сб, 24 октября"; the year appears only when it is not the current one.
+ */
+export function dateRange(from, to) {
+  const [start, end] = [noon(from), noon(to ?? from)];
+  const thisYear = new Date().getFullYear();
+  const year = start.getFullYear() !== thisYear || end.getFullYear() !== thisYear ? "numeric" : undefined;
+  if (start.getTime() === end.getTime()) {
+    return start.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long", year });
+  }
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year }).formatRange(start, end);
 }
 
 const relative = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });

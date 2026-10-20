@@ -44,18 +44,18 @@ function slots(running, max) {
 // Every limit is off at 0 (app/limits.py), so 0 reads "no limit", not "nothing allowed".
 function tiles(stats) {
   const { limits } = stats;
-  const perTrip = stats.trips ? usd(stats.llm_cost_total / stats.trips) : null;
+  const perJourney = stats.journeys ? usd(stats.llm_cost_total / stats.journeys) : null;
   const budget = limits.daily_budget_usd;
   const slotsMax = limits.max_concurrent;
   return h(
     "div",
     { class: "tiles" },
     tile("Пользователи", number(stats.users), plural(stats.users, "аккаунт", "аккаунта", "аккаунтов")),
-    tile("Прогулки", number(stats.trips), `${number(stats.trips_today)} сегодня`),
+    tile("Путешествия", number(stats.journeys), `${number(stats.journeys_today)} сегодня · ${number(stats.trips)} маршрутов дней`),
     budget
       ? tile("LLM сегодня", usd(stats.llm_cost_today), `из ${usd(budget)} дневного бюджета`, meter(stats.llm_cost_today, budget))
       : tile("LLM сегодня", usd(stats.llm_cost_today), "дневной бюджет не ограничен"),
-    tile("LLM за всё время", usd(stats.llm_cost_total), perTrip ? `≈ ${perTrip} за прогулку` : null),
+    tile("LLM за всё время", usd(stats.llm_cost_total), perJourney ? `≈ ${perJourney} за путешествие` : null),
     slotsMax
       ? tile("Агентов сейчас", `${limits.running} из ${slotsMax}`, "одновременных прогонов", slots(limits.running, slotsMax))
       : tile("Агентов сейчас", number(limits.running), "одновременных прогонов, без лимита"),
@@ -103,7 +103,7 @@ const USER_COLUMNS = [
 ];
 
 const TRIP_COLUMNS = [
-  ["Прогулка", (trip) => h("span", { class: "cell-title" }, trip.title)],
+  ["Путешествие", (trip) => h("span", { class: "cell-title" }, trip.title)],
   ["Город", (trip) => trip.city],
   ["Владелец", (trip) => trip.owner_email],
   ["Изменена", (trip) => when(trip.updated_at)],
@@ -117,7 +117,7 @@ function forbidden() {
       { class: "card empty admin-forbidden" },
       h("h2", {}, "Сюда пускают только администраторов"),
       h("p", {}, "Здесь статистика сервиса и траты на LLM. Если нужен доступ, напишите команде проекта."),
-      h("a", { class: "btn", href: "/app/trips" }, "К моим прогулкам"),
+      h("a", { class: "btn", href: "/app/trips" }, "К моим путешествиям"),
     ),
   );
 }
@@ -134,7 +134,7 @@ async function load() {
     root.replaceChildren(
       tiles(stats),
       table("Пользователи", USER_COLUMNS, users),
-      table("Последние прогулки", TRIP_COLUMNS, trips),
+      table("Последние путешествия", TRIP_COLUMNS, trips),
     );
     updated.textContent = `Данные на ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
     refresh.hidden = false;

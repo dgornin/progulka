@@ -84,3 +84,13 @@ def test_spend_before_a_restart_counts_against_the_budget():
     limits = Limits(per_hour=0, daily_budget_usd=0.02, max_concurrent=0)
     limits.spend(0.02)
     assert "Дневной лимит" in limits.admit("a")
+
+
+def test_a_spent_budget_is_reported_without_admitting_a_run():
+    limits = Limits(per_hour=0, daily_budget_usd=0.02, max_concurrent=1)
+    assert not limits.out_of_budget()
+
+    limits.spend(0.02)  # a transcription, which takes no run slot
+
+    assert limits.out_of_budget() and limits.running == 0
+    assert Limits(per_hour=0, daily_budget_usd=0, max_concurrent=0).out_of_budget() is False

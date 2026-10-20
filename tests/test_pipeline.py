@@ -1,8 +1,10 @@
-"""The whole pipeline offline: scripted LLM, fake sources, real optimizer and validator."""
+"""The whole pipeline on a one-day trip (a single walk) offline: scripted LLM, fake
+sources, real optimizer and validator. Trips of several days: tests/test_journey.py."""
 
 import asyncio
 import json
 from datetime import date, datetime, time
+from typing import Any
 
 import pytest
 
@@ -106,26 +108,39 @@ def _shortlist_spare() -> ToolCall:
     )
 
 
-async def _planned(events: Recorder, **request: str) -> tuple[pipeline.TripRun, FakeLLM]:
+async def _planned(events: Recorder, **request: str) -> tuple[pipeline.Journey, FakeLLM]:
     llm = FakeLLM(
         turns=_research_turns(), structured=[_brief_reply(), _texts([p.id for p in PLACES])]
     )
     req = pipeline.PlanRequest(request="Казань, 24 октября, с 10 до 13, история", **request)
-    return await pipeline.plan_trip(req, llm, events, DAY), llm
+    return await pipeline.plan_journey(req, llm, events, DAY), llm
+
+
+async def _feedback(
+    journey: pipeline.Journey, llm: FakeLLM, events: Recorder, **feedback: Any
+) -> tuple[pipeline.TripRun, str | None]:
+    memory = feedback.pop("memory", None)
+    req = pipeline.FeedbackRequest(**feedback)
+    journey, reply = await pipeline.apply_day_feedback(journey, 0, req, llm, events, memory=memory)
+    return journey.days[0], reply
 
 
 async def test_plan_then_remove_a_stop(sources):
     events = Recorder()
-    trip_run, llm = await _planned(events)
+    journey, llm = await _planned(events)
 
     done = [e.data["name"] for e in events if e.type == "stage" and e.data["status"] == "done"]
     assert done == ["brief", "weather", "research", "optimize", "route", "validate", "write"]
-    plan = trip_run.plan
+    # A single walk has no outline; its day's work is tagged as day 0.
+    assert {e.data.get("day") for e in events if e.data["name"] == "research"} == {0}
+    assert {e.data.get("day") for e in events if e.data["name"] == "weather"} == {None}
+    assert [d.index for d in journey.outline] == [0] and journey.outline[0].theme == ""
+    plan = journey.days[0].plan
     assert {s.place.id for s in plan.stops} == {p.id for p in PLACES}
-    assert plan.title == "Казань за утро"
+    assert plan.title == journey.title == "Казань за утро"
     assert plan.geometry is None  # no walking route: the UI draws dotted straight lines
     assert not [v for v in plan.violations if v.severity == "error"]
-    assert trip_run.learned == []  # no memory passed: the caller keeps none, nothing is learned
+    assert journey.learned == []  # no memory passed: the caller keeps none, nothing is learned
 
     # The "Убрать" button: no LLM interpretation, a short research run that must find a
     # replacement (finish is refused below the minimum), then the same optimizer and
@@ -136,9 +151,7 @@ async def test_plan_then_remove_a_stop(sources):
         turn(_shortlist_spare(), call("finish_research", summary="нашёл замену")),
     ]
     llm.structured_replies = [_texts([SPARE.id, *(p.id for p in PLACES if p.id != removed.id)])]
-    trip_run, reply = await pipeline.apply_feedback(
-        trip_run, pipeline.FeedbackRequest(exclude_place_ids=[removed.id]), llm, events
-    )
+    trip_run, reply = await _feedback(journey, llm, events, exclude_place_ids=[removed.id])
 
     stops = {s.place.id for s in trip_run.plan.stops}
     assert removed.id not in stops and SPARE.id in stops
@@ -154,15 +167,13 @@ async def test_removing_a_place_the_traveller_asked_for_stops_asking_for_it(sour
         structured=[{**_brief_reply(), "must_include": [asked.name]}, _texts([asked.id])],
     )
     req = pipeline.PlanRequest(request=f"Казань, с 10 до 13, история, обязательно {asked.name}")
-    trip_run = await pipeline.plan_trip(req, llm, Recorder(), DAY)
-    assert trip_run.state.shortlist[asked.id].required
+    journey = await pipeline.plan_journey(req, llm, Recorder(), DAY)
+    assert journey.days[0].state.shortlist[asked.id].required
 
     llm.turns = [turn(_shortlist_spare(), call("finish_research", summary="нашёл замену"))]
     llm.structured_replies = [_texts([SPARE.id])]
     events = Recorder()
-    trip_run, _ = await pipeline.apply_feedback(
-        trip_run, pipeline.FeedbackRequest(exclude_place_ids=[asked.id]), llm, events
-    )
+    trip_run, _ = await _feedback(journey, llm, events, exclude_place_ids=[asked.id])
 
     # Otherwise finish is refused until the agent finds the removed place again.
     assert trip_run.state.brief.must_include == []
@@ -175,16 +186,14 @@ async def test_removing_a_place_the_traveller_asked_for_stops_asking_for_it(sour
 
 async def test_new_avoid_phrase_drops_matching_places_until_it_is_lifted(sources):
     events = Recorder()
-    trip_run, llm = await _planned(events)
+    journey, llm = await _planned(events)
     museum = PLACES[0].id
     llm.structured_replies = [
         {"add_avoid": ["музеи"], "reply": "Уберу музеи."},
         _texts([p.id for p in PLACES]),
     ]
 
-    trip_run, _ = await pipeline.apply_feedback(
-        trip_run, pipeline.FeedbackRequest(feedback="без музеев"), llm, events
-    )
+    trip_run, _ = await _feedback(journey, llm, events, feedback="без музеев")
 
     # No new research: the avoid phrase alone drops the museum.
     assert museum not in {s.place.id for s in trip_run.plan.stops}
@@ -215,9 +224,7 @@ async def test_new_avoid_phrase_drops_matching_places_until_it_is_lifted(sources
         _texts([p.id for p in PLACES]),
     ]
 
-    trip_run, _ = await pipeline.apply_feedback(
-        trip_run, pipeline.FeedbackRequest(feedback="всё-таки хочу в музей"), llm, events
-    )
+    trip_run, _ = await _feedback(journey, llm, events, feedback="всё-таки хочу в музей")
 
     assert trip_run.state.brief.avoid == []
     assert museum in {s.place.id for s in trip_run.plan.stops}
@@ -225,7 +232,8 @@ async def test_new_avoid_phrase_drops_matching_places_until_it_is_lifted(sources
 
 
 async def test_the_route_leaves_out_what_the_current_avoid_list_rules_out(sources):
-    trip_run, _ = await _planned(Recorder())
+    journey, _ = await _planned(Recorder())
+    trip_run = journey.days[0]
     museum = PLACES[0].id
     trip_run.state.brief = trip_run.state.brief.model_copy(update={"avoid": ["без музеев"]})
 
@@ -238,18 +246,17 @@ async def test_the_route_leaves_out_what_the_current_avoid_list_rules_out(source
 
 async def test_feedback_asking_for_an_avoided_topic_lifts_the_old_avoid(sources):
     events = Recorder()
-    trip_run, llm = await _planned(events)
+    journey, llm = await _planned(events)
     church = PLACES[1].id
     # As if the profile said «не предлагать храмы» when the trip was planned.
-    trip_run.state.brief = trip_run.state.brief.model_copy(update={"avoid": ["Храмы"]})
+    state = journey.days[0].state
+    state.brief = state.brief.model_copy(update={"avoid": ["Храмы"]})
     llm.structured_replies = [
         {"add_interests": [{"label": "Храмы", "weight": 1.0, "source": "profile"}], "reply": "Ок."},
         _texts([p.id for p in PLACES]),
     ]
 
-    trip_run, _ = await pipeline.apply_feedback(
-        trip_run, pipeline.FeedbackRequest(feedback="всё-таки хочу в храм"), llm, events
-    )
+    trip_run, _ = await _feedback(journey, llm, events, feedback="всё-таки хочу в храм")
 
     # The old avoid would have made the church an error and started a repair round.
     assert church in {s.place.id for s in trip_run.plan.stops}
@@ -264,9 +271,9 @@ async def test_feedback_asking_for_an_avoided_topic_lifts_the_old_avoid(sources)
 
 async def test_feedback_without_new_places_still_gets_the_repair_round(sources, monkeypatch):
     events = Recorder()
-    trip_run, llm = await _planned(events)
-    kept = trip_run.plan.stops[0].place.id
-    others = [s.place.id for s in trip_run.plan.stops[1:]]
+    journey, llm = await _planned(events)
+    kept = journey.days[0].plan.stops[0].place.id
+    others = [s.place.id for s in journey.days[0].plan.stops[1:]]
     monkeypatch.setattr(pipeline, "REPAIR_STEPS", 1)
     # The replanner asks for no research, yet one stop is too few: the validator's error
     # starts the repair round, whose agent finds a second place.
@@ -276,9 +283,7 @@ async def test_feedback_without_new_places_still_gets_the_repair_round(sources, 
         _texts([kept, SPARE.id]),
     ]
 
-    trip_run, _ = await pipeline.apply_feedback(
-        trip_run, pipeline.FeedbackRequest(feedback="оставь только первое"), llm, events
-    )
+    trip_run, _ = await _feedback(journey, llm, events, feedback="оставь только первое")
 
     assert {s.place.id for s in trip_run.plan.stops} == {kept, SPARE.id}
     assert "The route check found these problems" in llm.seen[-2][1]["content"]
@@ -286,10 +291,10 @@ async def test_feedback_without_new_places_still_gets_the_repair_round(sources, 
 
 async def test_feedback_that_leaves_no_stops_is_an_error_not_a_route(sources, monkeypatch):
     events = Recorder()
-    trip_run, llm = await _planned(events)
+    journey, llm = await _planned(events)
     monkeypatch.setattr(pipeline, "REPAIR_STEPS", 1)
     llm.turns = [turn(content="Ничего не нашёл.")]
-    every = [s.place.id for s in trip_run.plan.stops]
+    every = [s.place.id for s in journey.days[0].plan.stops]
     llm.structured_replies = [
         {"exclude_place_ids": every, "end_time": "12:00", "reply": "Убираю всё."}
     ]
@@ -297,15 +302,13 @@ async def test_feedback_that_leaves_no_stops_is_an_error_not_a_route(sources, mo
     # Every stop removed and the repair finds nothing: an empty route is an error,
     # not a result (and the caller saves nothing).
     with pytest.raises(pipeline.PipelineError, match="ни одно найденное место"):
-        await pipeline.apply_feedback(
-            trip_run, pipeline.FeedbackRequest(feedback="убери всё"), llm, events
-        )
+        await _feedback(journey, llm, events, feedback="убери всё")
 
 
 async def test_a_provider_that_hangs_on_the_brief_or_the_feedback_is_a_user_facing_error(
     sources, monkeypatch
 ):
-    trip_run, llm = await _planned(Recorder())
+    journey, llm = await _planned(Recorder())
 
     async def hang(*_, **__):
         await asyncio.Event().wait()
@@ -314,11 +317,9 @@ async def test_a_provider_that_hangs_on_the_brief_or_the_feedback_is_a_user_faci
     monkeypatch.setattr(pipeline, "LLM_STEP_TIMEOUT_S", 0.01)
 
     with pytest.raises(pipeline.PipelineError, match="не ответил вовремя"):
-        await pipeline.plan_trip(pipeline.PlanRequest(request="Казань"), llm, Recorder(), DAY)
+        await pipeline.plan_journey(pipeline.PlanRequest(request="Казань"), llm, Recorder(), DAY)
     with pytest.raises(pipeline.PipelineError, match="не ответил вовремя"):
-        await pipeline.apply_feedback(
-            trip_run, pipeline.FeedbackRequest(feedback="покороче"), llm, Recorder()
-        )
+        await _feedback(journey, llm, Recorder(), feedback="покороче")
 
 
 @pytest.mark.parametrize(
@@ -336,7 +337,7 @@ async def test_city_lookup_failure_is_a_user_facing_error(sources, monkeypatch, 
     llm = FakeLLM(structured=[{**_brief_reply(), "city": "Атлантида"}])
 
     with pytest.raises(pipeline.PipelineError, match=message):
-        await pipeline.plan_trip(pipeline.PlanRequest(request="Атлантида"), llm, Recorder(), DAY)
+        await pipeline.plan_journey(pipeline.PlanRequest(request="Атлантида"), llm, Recorder(), DAY)
 
 
 @pytest.mark.parametrize(
@@ -358,9 +359,9 @@ async def test_start_point_lookup_failure_starts_from_the_centre(
     monkeypatch.setattr(geocode, "geocode", geocoder)
     events = Recorder()
 
-    trip_run, _ = await _planned(events, start_point="Кремль")
+    journey, _ = await _planned(events, start_point="Кремль")
 
-    assert trip_run.plan.start.label == "центр, Казань"
+    assert journey.start.label == journey.days[0].plan.start.label == "центр, Казань"
     [warning] = [e.data["message"] for e in events if e.type == "warning"]
     assert warning.startswith(message)
 
@@ -379,7 +380,7 @@ async def test_real_streets_longer_than_the_limit_drop_the_weakest_stop(sources,
         structured=[{**_brief_reply(), "max_walk_km": 3.5}, _texts([p.id for p in PLACES])],
     )
     req = pipeline.PlanRequest(request="Казань, с 10 до 13, история, не больше 3,5 км")
-    trip_run = await pipeline.plan_trip(req, llm, Recorder(), DAY)
+    trip_run = (await pipeline.plan_journey(req, llm, Recorder(), DAY)).days[0]
 
     assert trip_run.plan.total_walk_m <= 3_500
     assert len(trip_run.plan.stops) == 3 and len(trip_run.plan.dropped) == 1
@@ -429,7 +430,7 @@ async def test_profile_and_memory_reach_the_agent_and_new_facts_are_learned(sour
     events = Recorder()
     req = pipeline.PlanRequest(request="Казань, 24 октября, с 10 до 13, история. Обожаю дворики")
 
-    trip_run = await pipeline.plan_trip(req, llm, events, DAY, profile=profile, memory=memory)
+    journey = await pipeline.plan_journey(req, llm, events, DAY, profile=profile, memory=memory)
 
     stages = [e.data for e in events if e.type == "stage" and e.data["status"] == "done"]
     brief_detail = next(d["detail"] for d in stages if d["name"] == "brief")
@@ -450,7 +451,7 @@ async def test_profile_and_memory_reach_the_agent_and_new_facts_are_learned(sour
     memory_input = json.loads(llm.seen[4][1]["content"])
     assert memory_input["messages"] == [req.request]
     assert "Питание: вегетарианец" in memory_input["known_facts"]
-    assert trip_run.learned == ["любит тихие дворы"]
+    assert journey.learned == ["любит тихие дворы"]
     assert [e.data for e in events if e.type == "memory"] == [{"facts": ["любит тихие дворы"]}]
 
 
@@ -458,33 +459,34 @@ async def test_empty_request_with_a_city_skips_the_brief_llm_call(sources):
     llm = FakeLLM(turns=_research_turns(), structured=[_texts([p.id for p in PLACES])])
     req = pipeline.PlanRequest(
         city="Казань",
-        date=DAY,
+        date_from=DAY,
         start_time=time(10),
         end_time=time(13),
         preferences=WalkPreferences(more=["history"], pace="relaxed"),
     )
 
-    trip_run = await pipeline.plan_trip(req, llm, Recorder(), DAY, memory=[])
+    journey = await pipeline.plan_journey(req, llm, Recorder(), DAY, memory=[])
 
+    trip_run = journey.days[0]
     brief = trip_run.state.brief
     assert llm.seen[0][0]["content"].startswith(RESEARCHER)  # the first LLM call is the agent's
     assert (brief.city, brief.language, brief.pace) == ("Казань", "ru", "relaxed")
     assert [(i.label, i.source) for i in brief.interests] == [("История", "walk")]
     assert len(trip_run.plan.stops) == 4
-    assert trip_run.learned == []  # no text, nothing to learn from
+    assert journey.learned == []  # no text, nothing to learn from
 
 
 async def test_empty_request_needs_a_city_from_the_form_or_the_profile(sources):
     llm = FakeLLM()
-    with pytest.raises(pipeline.PipelineError, match="Опишите прогулку или укажите город"):
-        await pipeline.plan_trip(pipeline.PlanRequest(request="   "), llm, Recorder(), DAY)
+    with pytest.raises(pipeline.PipelineError, match="Опишите путешествие или укажите город"):
+        await pipeline.plan_journey(pipeline.PlanRequest(request="   "), llm, Recorder(), DAY)
     assert llm.seen == []
 
     llm = FakeLLM(turns=_research_turns(), structured=[_texts([p.id for p in PLACES])])
     profile = Profile(home_city="Казань", interests={"history": 1.0}, max_walk_km=6)
     req = pipeline.PlanRequest(start_time=time(10), end_time=time(13))
-    trip_run = await pipeline.plan_trip(req, llm, Recorder(), DAY, profile)
-    brief = trip_run.state.brief
+    journey = await pipeline.plan_journey(req, llm, Recorder(), DAY, profile)
+    brief = journey.days[0].state.brief
     assert (brief.city, brief.max_walk_km) == ("Казань", 6)
     assert [(i.label, i.weight, i.source) for i in brief.interests] == [("История", 0.7, "profile")]
 
@@ -494,7 +496,7 @@ async def test_a_window_too_short_to_walk_is_refused_before_the_research(sources
     req = pipeline.PlanRequest(city="Казань", start_time=time(23, 59))
 
     with pytest.raises(pipeline.PipelineError, match="23:59–23:59 слишком короткое"):
-        await pipeline.plan_trip(req, llm, Recorder(), DAY)
+        await pipeline.plan_journey(req, llm, Recorder(), DAY)
     assert llm.seen == []
 
 
@@ -505,33 +507,27 @@ def test_a_form_whose_end_is_not_after_its_start_is_invalid():
 
 async def test_feedback_text_is_learned_from_and_the_remove_button_is_not(sources):
     events = Recorder()
-    trip_run, llm = await _planned(events)
+    journey, llm = await _planned(events)
     llm.structured_replies = [
         {"reply": "Учту."},
         _texts([p.id for p in PLACES]),
         {"facts": ["вегетарианец"]},
     ]
 
-    trip_run, _ = await pipeline.apply_feedback(
-        trip_run,
-        pipeline.FeedbackRequest(feedback="кстати, я вегетарианец"),
-        llm,
-        events,
-        memory=[],
+    trip_run, _ = await _feedback(
+        journey, llm, events, feedback="кстати, я вегетарианец", memory=[]
     )
 
-    assert trip_run.learned == ["вегетарианец"]
+    assert journey.learned == ["вегетарианец"]
     assert events[-2] == pipeline.AgentEvent(type="memory", data={"facts": ["вегетарианец"]})
     assert events[-1].data == {"name": "memory", "status": "done", "label": "Новых фактов: 1"}
 
     removed = trip_run.plan.stops[0].place.id
     llm.turns = [turn(_shortlist_spare(), call("finish_research", summary="нашёл замену"))]
     llm.structured_replies = [_texts([SPARE.id])]
-    trip_run, _ = await pipeline.apply_feedback(
-        trip_run, pipeline.FeedbackRequest(exclude_place_ids=[removed]), llm, events, memory=[]
-    )
+    await _feedback(journey, llm, events, exclude_place_ids=[removed], memory=[])
 
-    assert trip_run.learned == []  # the last run's facts are not reported twice
+    assert journey.learned == []  # the last run's facts are not reported twice
     assert llm.structured_replies == []  # and the button made no memory call
 
 

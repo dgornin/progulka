@@ -1,5 +1,5 @@
 /*
- * Прогулка — the account pages: sign-in, the trips cabinet, the profile and its
+ * Прогулка — the account pages: sign-in, the journeys cabinet, the profile and its
  * onboarding questionnaire, the admin page. Built only from base.css tokens and
  * components; what is here is page layout and the few page-specific pieces.
  */
@@ -150,7 +150,7 @@
   .auth-box { padding-block: 28px; }
 }
 
-/* ---------- trips cabinet ---------- */
+/* ---------- journeys cabinet ---------- */
 
 .new-trip::before { content: "+"; font-size: 1.2em; font-weight: 700; line-height: 1; }
 
@@ -160,11 +160,11 @@
   gap: 20px;
 }
 
+/* a card is a travel ticket: the journey above, a perforated stub below */
 .trip-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   border: 1px solid var(--rule);
   border-radius: var(--radius-lg);
   background: var(--card);
@@ -179,48 +179,85 @@
 .trip-card.is-removing { opacity: 0; transform: scale(0.97); }
 
 .trip-sketch {
-  aspect-ratio: 320 / 112;
+  aspect-ratio: 320 / 128;
   border-bottom: 1px solid var(--rule);
+  /* the card does not clip its children: the stub's notches must reach over its border */
+  border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0;
   /* squared field-notebook dots under the route sketch */
   background: var(--paper) radial-gradient(circle, #e4dfd5 1px, transparent 1.5px) 0 0 / 16px 16px;
 }
 .trip-sketch svg { width: 100%; height: 100%; }
-.trip-path { fill: none; stroke: var(--route); stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 0.1 8.9; }
-.trip-stop { fill: var(--route); stroke: #fff; stroke-width: 2.5; }
+.trip-path { fill: none; stroke: var(--day); stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 0.1 8.9; }
+.trip-stop { fill: var(--day); stroke: #fff; stroke-width: 2.5; }
+.trip-end { fill: var(--day); stroke: #fff; stroke-width: 3; }
 .trip-start { fill: var(--ink); stroke: #fff; stroke-width: 3; }
-.trip-end { fill: var(--route); stroke: #fff; stroke-width: 3; }
 .trip-card:hover .trip-path { animation: march 0.9s linear infinite; }
 @keyframes march { to { stroke-dashoffset: -18; } }
 
-.trip-body { display: grid; align-content: start; gap: 6px; flex: 1; padding: 18px 20px 4px; }
+.trip-body { display: grid; align-content: start; gap: 6px; flex: 1; padding: 18px 20px 14px; }
 .trip-meta { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--route-deep); }
 .trip-title { font: 600 1.28rem/1.25 var(--serif); letter-spacing: -0.005em; text-wrap: balance; }
 .trip-title a { color: var(--ink); text-decoration: none; }
 .trip-title a:focus-visible { outline: none; }
 /* the whole card is the link; the delete button sits above it */
 .trip-title a::after { content: ""; position: absolute; inset: 0; }
+
+.trip-dates { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 2px; font-weight: 500; }
+.trip-days { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 500; color: var(--muted); }
+.trip-ticks { display: inline-flex; gap: 3px; }
+.trip-ticks i { width: 12px; height: 5px; border-radius: 3px; background: var(--day); }
+
 .trip-stats { display: flex; flex-wrap: wrap; gap: 4px 0; font-size: 0.94rem; color: var(--ink-soft); }
 .trip-stats span + span::before { content: "·"; margin: 0 10px; color: var(--faint); }
 
 .trip-foot {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 10px 10px 12px 20px;
+  border-top: 2px dashed var(--rule);
   font-size: 0.86rem;
   color: var(--muted);
 }
+/*
+ * The punched notches of the stub: circles of page colour centred on the card's edges.
+ * Turned by 45°, two border sides outline exactly the half inside the card; the outer
+ * half is page colour on page colour, so the notch reads as a bite out of the ticket.
+ */
+.trip-foot::before,
+.trip-foot::after {
+  content: "";
+  position: absolute;
+  top: -13px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid;
+  border-radius: 50%;
+  background: var(--bg);
+  transform: rotate(45deg);
+}
+.trip-foot::before { left: -12px; border-color: var(--trip-edge) var(--trip-edge) transparent transparent; }
+.trip-foot::after { right: -12px; border-color: transparent transparent var(--trip-edge) var(--trip-edge); }
+.trip-card { --trip-edge: var(--rule); }
+.trip-card:hover { --trip-edge: var(--rule-strong); }
 .trip-delete { position: relative; z-index: 1; color: var(--muted); }
 .trip-delete:hover:not(:disabled) { background: var(--red-tint); color: var(--red); }
 
 .trip-card.is-loading { pointer-events: none; }
-.trip-card.is-loading .trip-sketch { border: 0; border-radius: 0; }
+.trip-card.is-loading .trip-sketch { border: 0; }
 .trip-card .line { height: 14px; width: 45%; }
 .trip-card .line.wide { height: 24px; width: 85%; margin-bottom: 14px; }
 
 .trips-empty, .trips-error { grid-column: 1 / -1; }
 .trips-empty { padding: 56px 24px; }
+/* an empty cabinet is a suitcase with the day colours as luggage stickers */
+.trips-empty::before {
+  width: 132px;
+  height: 80px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 132 80'%3E%3Cpath d='M52 17v-6a4 4 0 0 1 4-4h20a4 4 0 0 1 4 4v6' fill='none' stroke='%231c1f1d' stroke-width='3'/%3E%3Crect x='18' y='17' width='96' height='56' rx='10' fill='%23fff' stroke='%231c1f1d' stroke-width='3'/%3E%3Cpath d='M40 17v56M92 17v56' stroke='%231c1f1d' stroke-width='2' stroke-dasharray='0.1 5' stroke-linecap='round'/%3E%3Ccircle cx='66' cy='42' r='11' fill='%23c8412a'/%3E%3Ccircle cx='66' cy='42' r='3.5' fill='%23fff'/%3E%3Crect x='96' y='27' width='14' height='10' rx='2' fill='%232a7fb8' transform='rotate(-14 103 32)'/%3E%3Crect x='23' y='52' width='13' height='13' rx='6.5' fill='%230e7c5a'/%3E%3C/svg%3E");
+}
 
 /* ---------- profile and onboarding ---------- */
 

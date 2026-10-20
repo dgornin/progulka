@@ -1,8 +1,10 @@
 /*
- * Прогулка — the landing page. The page itself reads like a walk: the hero shows a
- * real request and the route the agent built for it, "how it works" is a dotted route
- * with five stops, and the evaluation numbers sit on a scoreboard. Everything is light:
- * white sections, one barely tinted band, colour only where the route is.
+ * Прогулка — the landing page, written for a traveller in an unfamiliar city. It reads
+ * like a trip folder: the hero shows a real request and the first day of the route the
+ * agent built for it, under a passport stamp and a ticket with the days of the trip;
+ * "how it works" is a dotted route with five stops; the evaluation numbers sit on a
+ * scoreboard. Everything stays light: white sections, two barely tinted bands, colour
+ * only where routes and days are.
  */
 
 /* the landing breathes wider than the cabinet pages */
@@ -26,17 +28,28 @@
   font-weight: 500;
   color: var(--ink-soft);
   text-decoration: none;
+  white-space: nowrap;
 }
 .site-nav a:hover { background: var(--paper-deep); color: var(--ink); }
 .site-actions { display: flex; gap: 8px; margin-left: auto; }
 
-@media (max-width: 900px) {
+/* section links jump under the sticky header, not behind it */
+.landing section[id], .landing footer[id] { scroll-margin-top: 72px; }
+
+@media (max-width: 1080px) {
   .site-nav { display: none; }
 }
 /* a 375px phone has room for the logo and both buttons only when they tighten up */
+.label-short { display: none; }
 @media (max-width: 480px) {
   .site-header-inner { gap: 12px; }
   .site-actions .btn { min-height: 38px; padding: 0 12px; }
+  .label-long { display: none; }
+  .label-short { display: inline; }
+}
+/* on the narrowest phones «Войти» leaves the bar: the hero repeats it under the main buttons */
+@media (max-width: 359px) {
+  .site-actions .btn-ghost { display: none; }
 }
 
 /* ---------- hero ---------- */
@@ -54,8 +67,8 @@
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
-  gap: 56px;
+  grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr);
+  gap: 64px;
   align-items: center;
 }
 
@@ -64,7 +77,7 @@
 .hero-copy > :nth-child(2) { animation-delay: 80ms; }
 .hero-copy > :nth-child(3) { animation-delay: 160ms; }
 .hero-copy > :nth-child(n + 4) { animation-delay: 240ms; }
-.hero-copy .lead { max-width: 52ch; }
+.hero-copy .lead { max-width: 54ch; }
 
 .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
 .hero-note { color: var(--muted); }
@@ -84,8 +97,8 @@
   color: var(--muted);
 }
 
-/* the cards hang off the map's left edge into the gap, over the part of the map the route leaves empty */
-.hero-preview { position: relative; margin: 0; padding-bottom: 120px; animation: rise 0.8s 0.15s ease-out both; }
+/* the request and the ticket hang off the map's left edge, over the part the route leaves empty */
+.hero-preview { position: relative; margin: 0; padding-bottom: 196px; animation: rise 0.8s 0.15s ease-out both; }
 
 .preview-map {
   position: relative;
@@ -108,54 +121,105 @@
   color: var(--muted);
 }
 
-.preview-request,
-.preview-plan {
+/* the passport stamp: ink pressed over the corner of the map */
+.stamp {
   position: absolute;
-  left: -40px;
-  margin: 0;
-  border: 1px solid var(--rule);
-  background: #fff;
-  box-shadow: var(--shadow-lg);
+  top: -42px;
+  right: -30px;
+  width: 152px;
+  color: var(--route-deep);
+  opacity: 0.88;
+  mix-blend-mode: multiply;
+  transform: rotate(-13deg);
+  animation: stamp 0.5s 0.95s cubic-bezier(0.3, 1.5, 0.5, 1) both;
 }
+.stamp text { fill: currentColor; }
+.stamp-ring { font: 600 12px var(--mono); }
+.stamp-days { font: 600 34px var(--serif); }
+.stamp-label { font: 600 11px var(--mono); letter-spacing: 0.24em; }
+@keyframes stamp { from { opacity: 0; transform: rotate(-4deg) scale(1.5); } }
 
 .preview-request {
+  position: absolute;
   top: -20px;
-  width: min(20rem, 52%);
+  left: -40px;
+  width: min(21rem, 54%);
+  margin: 0;
   padding: 16px 18px;
+  border: 1px solid var(--rule);
   border-radius: 18px 18px 18px 4px;
-  font: italic 400 1.04rem/1.45 var(--serif);
+  background: #fff;
+  box-shadow: var(--shadow-lg);
+  font: italic 400 1.02rem/1.45 var(--serif);
   color: var(--ink);
   animation: rise 0.6s 0.5s ease-out both;
 }
 .preview-label {
   margin-bottom: 4px;
   font: 600 0.72rem/1.3 var(--sans);
+  font-style: normal;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.preview-plan {
+/*
+ * The ticket: the trip and its days above a perforation, day 1 below. Two halves with
+ * notches cut by masks; the shadow is a drop-shadow on the whole ticket, so it follows
+ * the notches instead of drawing a box around them.
+ */
+.ticket {
+  position: absolute;
+  left: -40px;
   bottom: 0;
   display: grid;
-  gap: 10px;
-  width: min(22.5rem, 60%);
-  padding: 20px 22px;
-  border-radius: var(--radius-lg);
+  width: min(23.5rem, 62%);
+  filter: drop-shadow(0 0 1px rgb(28 31 29 / 0.28)) drop-shadow(0 20px 28px rgb(28 31 29 / 0.16));
   animation: rise 0.6s 0.75s ease-out both;
 }
+.ticket-head,
+.ticket-body { background: #fff; }
+.ticket-head {
+  display: grid;
+  gap: 12px;
+  padding: 18px 22px 18px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  mask:
+    radial-gradient(circle 10px at 0 100%, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 10px at 100% 100%, #0000 97%, #000) right / 51% 100% no-repeat;
+}
+.ticket-body {
+  display: grid;
+  gap: 10px;
+  padding: 18px 22px 20px;
+  border-top: 2px dashed var(--rule-strong);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  mask:
+    radial-gradient(circle 10px at 0 0, #0000 97%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 10px at 100% 0, #0000 97%, #000) right / 51% 100% no-repeat;
+}
+.ticket-route { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+.ticket-route b { font: 600 1.16rem/1.2 var(--serif); }
+.ticket-route span { font: 500 0.8rem var(--mono); color: var(--muted); }
+.ticket .day-strip li { max-width: none; }
+.ticket .day-strip li:not(.is-current) { animation: rise 0.4s ease-out both; }
+.ticket .day-strip li:nth-child(2) { animation-delay: 1.05s; }
+.ticket .day-strip li:nth-child(3) { animation-delay: 1.15s; }
+.ticket .day-strip li:nth-child(4) { animation-delay: 1.25s; }
+.ticket .day-strip li:nth-child(5) { animation-delay: 1.35s; }
+
 .preview-title { font: 600 1.2rem/1.25 var(--serif); text-wrap: balance; }
 
 .preview-stats { display: flex; }
 .preview-stats div { display: flex; flex-direction: column-reverse; padding: 0 14px; border-left: 1px solid var(--rule); white-space: nowrap; }
 .preview-stats div:first-child { padding-left: 0; border-left: 0; }
-.preview-stats dd { font: 600 1.25rem/1.2 var(--serif); }
+.preview-stats dd { font: 600 1.2rem/1.2 var(--serif); }
 .preview-stats dt { font-size: 0.78rem; color: var(--muted); }
 
 .preview-stops {
   display: grid;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 2px;
   padding-top: 12px;
   border-top: 1px solid var(--rule);
 }
@@ -167,7 +231,7 @@
   height: 26px;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: var(--route);
+  background: var(--day-1);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
   font-size: 0.74rem;
   font-weight: 700;
@@ -180,15 +244,26 @@
 .preview-more { font-size: 0.86rem; color: var(--muted); }
 
 @media (max-width: 1080px) {
-  .hero { padding: 40px 0 64px; }
-  .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+  .hero { padding: 48px 0 64px; }
+  .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 64px; }
   .hero-preview { margin-left: 40px; }
+  .stamp { right: -10px; }
 }
 
 @media (max-width: 640px) {
   .hero-preview { margin-left: 0; padding-bottom: 0; }
   .preview-request { display: none; }
-  .preview-plan { position: relative; left: 0; width: auto; margin: -48px 12px 0; }
+  .stamp { top: -28px; right: -6px; width: 112px; }
+  .ticket { position: relative; left: 0; width: auto; margin: -48px 12px 0; }
+}
+/* a 320px phone: five day stubs and three numbers still fit across the ticket */
+@media (max-width: 400px) {
+  .ticket { margin-inline: 0; }
+  .ticket-head, .ticket-body { padding-inline: 14px; }
+  .ticket .day-strip { gap: 4px; }
+  .ticket .day-strip li { min-width: 0; }
+  .preview-stats div { padding: 0 8px; }
+  .preview-stats dd { font-size: 1rem; }
 }
 
 /* ---------- sections ---------- */
@@ -201,7 +276,86 @@
   .section-head { margin-bottom: 36px; }
 }
 
-/* how it works: five stops on a dotted route */
+/* the two tinted bands: who it is for, and the evaluation */
+.travel, .why { background: var(--paper); border-block: 1px solid var(--rule); }
+
+/* ---------- for travellers ---------- */
+
+.travel-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; align-items: center; }
+.travel-copy { display: grid; gap: 18px; }
+
+.checks { display: grid; gap: 14px; margin-top: 8px; }
+.checks li { position: relative; min-height: 28px; padding: 2px 0 0 42px; color: var(--ink-soft); }
+.checks li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--green-tint) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%232c6e49' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 15px no-repeat;
+}
+.checks b { color: var(--ink); }
+
+/* hours of manual preparation against minutes: one hatched block per day of the trip */
+.ledger {
+  display: grid;
+  gap: 24px;
+  margin: 0;
+  padding: 30px 30px 26px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+.ledger-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ledger-row { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr) 5.6rem; align-items: center; gap: 16px; }
+.ledger-label { display: grid; font-weight: 600; line-height: 1.3; }
+.ledger-label small { font-size: 0.82rem; font-weight: 400; color: var(--muted); }
+.ledger-bar { display: flex; gap: 4px; height: 46px; }
+.ledger-bar.is-manual span {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  border-top: 4px solid var(--day);
+  border-radius: 6px;
+  background: repeating-linear-gradient(-45deg, var(--paper-deep) 0 5px, var(--paper) 5px 10px);
+  font: 500 0.78rem var(--mono);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.ledger-bar.is-agent { align-items: center; }
+.ledger-bar.is-agent span {
+  width: 12px;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--route);
+  box-shadow: 0 0 0 5px var(--route-tint);
+}
+.ledger-total { font: 500 1.6rem/1 var(--serif); text-align: right; white-space: nowrap; }
+.ledger-row.is-agent .ledger-total { color: var(--route-deep); }
+.ledger-punch { padding-top: 20px; border-top: 1px solid var(--rule); font: italic 400 1.14rem/1.45 var(--serif); color: var(--ink); }
+.ledger-note { margin-top: -10px; font-size: 0.88rem; color: var(--muted); }
+
+@media (max-width: 1080px) {
+  .travel-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+}
+@media (max-width: 560px) {
+  .ledger { padding: 22px 18px; }
+  .ledger-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; }
+  .ledger-bar { grid-column: 1 / -1; grid-row: 2; }
+  .ledger-bar.is-manual span { font-size: 0.7rem; }
+}
+
+/* ---------- how it works: five stops on a dotted route ---------- */
+
 .walk { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 32px; }
 .walk::before {
   content: "";
@@ -250,8 +404,8 @@
   .walk-text { max-width: 60ch; padding-top: 8px; }
 }
 
-/* why: the evaluation as a scoreboard on the one tinted band */
-.why { background: var(--paper); border-block: 1px solid var(--rule); }
+/* ---------- why: the evaluation as a scoreboard ---------- */
+
 .why-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 64px; align-items: center; }
 .why-copy { display: grid; gap: 18px; }
 
@@ -299,9 +453,16 @@
   .score th, .score td { padding: 14px; }
   .score td { font-size: 1.8rem; }
 }
+/* the narrowest phones: the unit goes under its number so both columns of figures fit */
+@media (max-width: 400px) {
+  .score th, .score td { padding: 12px 10px; }
+  .score td { font-size: 1.5rem; }
+  .unit { display: block; margin: 4px 0 0; }
+}
 
-/* you: four features, each with a small real-looking sample */
-.feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+/* ---------- features: a bento of five, each with a small real-looking sample ---------- */
+
+.feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .feature {
   display: grid;
   align-content: start;
@@ -315,6 +476,90 @@
 .feature:hover { border-color: var(--rule-strong); box-shadow: var(--shadow); }
 .feature h3 { font: 600 1.35rem/1.25 var(--serif); }
 .feature p { color: var(--ink-soft); }
+.demo-quote { font: italic 400 1.08rem/1.45 var(--serif); }
+.feature .demo-quote { color: var(--ink); }
+
+/* the journey: days listed beside a sketch of one city with three coloured routes */
+.feature-journey { grid-column: span 2; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: center; gap: 28px; }
+.feature-text { display: grid; gap: 12px; }
+.demo-days { display: grid; margin-top: 6px; border-top: 1px solid var(--rule); }
+.demo-days li {
+  display: grid;
+  grid-template-columns: 26px 3.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule);
+  font-weight: 500;
+}
+.demo-days b, .demo-edit-day b {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--day);
+  font-size: 0.78rem;
+  color: #fff;
+}
+.demo-days span { font: 500 0.8rem var(--mono); color: var(--muted); }
+
+.demo-map { width: 100%; height: auto; border-radius: 14px; }
+.map-land { fill: #f3f1ec; }
+.map-park { fill: #dfeedd; }
+.map-water { fill: none; stroke: #cfe1ec; stroke-width: 24; stroke-linecap: round; }
+.map-road { fill: none; stroke: #fff; stroke-width: 7; }
+.map-lane { fill: none; stroke: #fff; stroke-width: 3; }
+.map-route { fill: none; stroke: var(--day); stroke-width: 4.5; stroke-linecap: round; stroke-dasharray: 0.1 9.4; }
+.map-stop { fill: var(--day); stroke: #fff; stroke-width: 2.5; }
+.map-hotel { fill: var(--ink); stroke: #fff; stroke-width: 3; }
+.map-hotel-mark { fill: #fff; }
+.feature-journey:hover .map-route { animation: march 0.9s linear infinite; }
+@keyframes march { to { stroke-dashoffset: -19; } }
+
+/* voice: a recording in progress */
+.demo-voice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+  padding: 10px 16px 10px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+}
+.voice-mic {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--route);
+  box-shadow: 0 0 0 0 var(--route-tint);
+  animation: listening 1.6s ease-out infinite;
+}
+.voice-mic svg { width: 20px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; }
+.voice-mic rect { fill: #fff; stroke: none; }
+.voice-wave { display: flex; flex: 1; align-items: center; gap: 3px; height: 28px; }
+.voice-wave i { flex: 1; max-width: 4px; height: 100%; border-radius: 2px; background: var(--route); transform-origin: center; animation: level 0.9s ease-in-out infinite alternate; }
+.voice-wave i:nth-child(3n) { animation-duration: 0.7s; }
+.voice-wave i:nth-child(3n + 1) { animation-duration: 1.1s; animation-delay: -0.4s; }
+.voice-wave i:nth-child(4n) { animation-delay: -0.2s; }
+.voice-wave i:nth-child(5n + 2) { animation-delay: -0.6s; }
+.voice-time { font: 500 0.86rem var(--mono); color: var(--muted); }
+@keyframes level { from { transform: scaleY(0.2); } to { transform: scaleY(1); } }
+@keyframes listening { to { box-shadow: 0 0 0 10px transparent; } }
+/* without motion the wave keeps a recognisable, uneven shape */
+@media (prefers-reduced-motion: reduce) {
+  .voice-wave i { transform: scaleY(0.5); }
+  .voice-wave i:nth-child(odd) { transform: scaleY(0.9); }
+  .voice-wave i:nth-child(3n) { transform: scaleY(0.3); }
+}
+
+/* edits: one day, one phrase */
+.demo-edit { display: grid; gap: 10px; margin-top: 6px; padding: 16px 18px; border-left: 4px solid var(--day-4); border-radius: 0 var(--radius) var(--radius) 0; background: var(--paper); }
+.demo-edit-day { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--ink); }
 
 .demo-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .demo-chips span {
@@ -328,39 +573,68 @@
 .demo-chips [data-level="plain"] { border-color: #eeb8a6; background: var(--route-tint); color: var(--route-deep); }
 .demo-chips [data-level="strong"] { border-color: var(--route); background: var(--route); color: #fff; }
 .demo-chips [data-level="avoid"] { border-color: var(--ink); background: var(--ink); color: #fff; }
-.demo-chips [data-level="more"] { border-color: #b9d9c4; background: var(--green-tint); color: var(--green); }
-.demo-chips [data-level="less"] { border-style: dashed; color: var(--muted); }
 
-.demo-memory, .demo-trips { display: grid; margin-top: 8px; border-top: 1px solid var(--rule); }
-.demo-memory li, .demo-trips li { padding: 10px 0; border-bottom: 1px solid var(--rule); }
-.demo-memory li { font: italic 400 1.05rem/1.4 var(--serif); }
-.demo-trips li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
-.demo-trips b { font: 600 1.02rem var(--serif); }
-.demo-trips span { font-size: 0.88rem; color: var(--muted); }
+.demo-memory { display: grid; margin-top: 8px; border-top: 1px solid var(--rule); }
+.demo-memory li { padding: 10px 0; border-bottom: 1px solid var(--rule); font: italic 400 1.05rem/1.4 var(--serif); }
 
-@media (max-width: 900px) {
+@media (max-width: 1080px) {
+  .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .feature-journey { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
   .feature-grid { grid-template-columns: minmax(0, 1fr); }
+  .feature-journey { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* call to action */
-.cta { padding-top: 0; }
+/* ---------- call to action: a ticket with a tear-off stub ---------- */
+
+/*
+ * The notches below are turned squares: their layout box pokes past the page edge on a
+ * phone and would let it scroll sideways by a couple of pixels, so the band clips across.
+ */
+.cta { padding-top: 0; overflow-x: clip; }
 .cta-box {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 24px 40px;
+  gap: 24px 48px;
   padding: 52px 56px;
-  overflow: hidden;
   border: 1px solid #f2d6cb;
   border-radius: 28px;
   background: var(--route-wash);
 }
-.cta-box > div:first-child { display: grid; gap: 8px; }
+.cta-copy { display: grid; gap: 8px; }
 .cta-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+/*
+ * The perforation runs the full height of the ticket with a punched notch at each end:
+ * a circle of page colour centred on the edge, turned by 45° so that two border sides
+ * outline exactly the half that bites into the ticket (the same trick as the cabinet's
+ * cards in pages.css).
+ */
+.cta-perforation { position: relative; align-self: stretch; margin-block: -53px; border-left: 2px dashed #ecc3b4; }
+.cta-perforation::before,
+.cta-perforation::after {
+  content: "";
+  position: absolute;
+  left: -14px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: var(--bg);
+  transform: rotate(45deg);
+}
+.cta-perforation::before { top: -13px; border-right-color: #f2d6cb; border-bottom-color: #f2d6cb; }
+.cta-perforation::after { bottom: -13px; border-top-color: #f2d6cb; border-left-color: #f2d6cb; }
 
 @media (max-width: 900px) {
   .cta-box { grid-template-columns: minmax(0, 1fr); padding: 36px 28px; }
+  .cta-perforation { margin: 0 -29px; border-left: 0; border-top: 2px dashed #ecc3b4; }
+  .cta-perforation::before,
+  .cta-perforation::after { top: -14px; bottom: auto; border-color: transparent; }
+  .cta-perforation::before { left: -13px; border-top-color: #f2d6cb; border-right-color: #f2d6cb; }
+  .cta-perforation::after { left: auto; right: -13px; border-bottom-color: #f2d6cb; border-left-color: #f2d6cb; }
 }
 
 /* ---------- footer ---------- */

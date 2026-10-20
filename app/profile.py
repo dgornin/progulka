@@ -1,5 +1,5 @@
 """What the traveller tells us in a structured way: the interest catalog, the profile
-from the onboarding questionnaire, and the per-walk preferences of the planner.
+from the onboarding questionnaire, and the per-trip preferences of the planner.
 
 The catalog is the shared vocabulary of the questionnaire, the planner's
 "больше / меньше" panel and the research agent. A free-text interest ("конструктивизм")
@@ -161,7 +161,8 @@ class Profile(BaseModel):
 
 
 class WalkPreferences(BaseModel):
-    """The planner's panel for one walk; it wins over the request text and the profile."""
+    """The planner's panel for one trip, every day of it; it wins over the request text
+    and the profile."""
 
     more: list[str] = Field(default_factory=list, description="Catalog keys: «больше этого»")
     less: list[str] = Field(default_factory=list, description="Catalog keys: «меньше / не надо»")

@@ -1,15 +1,24 @@
-"""Persistence for everything the HTTP layer needs: accounts, profiles, memory, trips.
+"""Persistence for everything the HTTP layer needs: accounts, profiles, memory, journeys.
 
 The ORM stays inside this module: callers get pydantic models (the API's shapes) and
 pipeline objects, so a route handler never touches a database session. Every method
 opens its own short transaction, which also makes the store usable from the
 background task that keeps running an agent after the request handler has returned.
 
-A trip is a pipeline TripRun at rest: ResearchState (a dataclass of pydantic models)
-and the hourly weather go through pydantic TypeAdapters to JSON and back, so feedback
-on a saved trip continues exactly where the last run stopped, restart or not.
+A journey is a pipeline Journey at rest: a row for the journey and a row per day.
+Each day's ResearchState (a dataclass of pydantic models) and hourly weather go
+through pydantic TypeAdapters to JSON and back, so feedback on a saved day continues
+exactly where the last run stopped, restart or not. `taken` (the places of the other
+days) is not saved: the pipeline sets it before every run.
+
+In memory the days of a journey share one registry of found places, so one search
+serves every day. A day is saved with only the places its state refers to (shortlist,
+rejected places, its stops) rather than the whole registry once per day, and on load
+the days share the union again. The price: an edit that needs a place found earlier
+but never picked searches for it again, and the sources' HTTP cache answers that search.
 """
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, time
 from typing import Any, Literal
 
@@ -17,13 +26,13 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import load_only
 
 from app.agent.memory import fact_key
 from app.agent.tools import ResearchState
 from app.db import FACT_COLUMN_CHARS, AuthSession, MemoryFact, Trip, User, utcnow
-from app.models import HourWeather, Plan
-from app.pipeline import TripRun
+from app.db import Journey as JourneyRow
+from app.models import DayOutline, GeoPoint, HourWeather, Plan, TripBrief
+from app.pipeline import Journey, TripRun
 from app.profile import Profile, WalkPreferences
 
 # Old facts give way to new ones: the profile is the stable part, memory is recent.
@@ -49,31 +58,53 @@ class MemoryOut(BaseModel):
 
 
 class HistoryEntry(BaseModel):
-    """One run on a trip: the first plan or a feedback round."""
+    """One run on a journey: the plan of all its days, or feedback on one day."""
 
     at: datetime = Field(default_factory=utcnow)
     kind: Literal["plan", "feedback"]
+    day: int | None = None  # the day feedback changed; None for the plan
     text: str  # the request or the feedback, as the traveller typed it
     reply: str | None = None  # the agent's answer to feedback
     cost_usd: float = 0.0
 
 
-class TripSummary(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class DayView(BaseModel):
+    trip_id: str
+    index: int
+    date: date
+    theme: str
+    area: str | None
+    plan: Plan
+
+
+class JourneyView(BaseModel):
+    """A journey as the planner shows it: the route of every day, for one map."""
 
     id: str
     title: str
     city: str
-    date: date
-    stops: int
-    walk_km: float
+    date_from: date
+    date_to: date  # inclusive; equals date_from for one day
+    start: GeoPoint
+    outline: list[DayOutline]
+    days: list[DayView]
+
+
+class JourneySummary(BaseModel):
+    id: str
+    title: str
+    city: str
+    date_from: date
+    date_to: date
+    days: int
+    stops: int  # of all days
+    walk_km: float  # of all days
     created_at: datetime
     updated_at: datetime
 
 
-class TripDetail(BaseModel):
-    trip: TripSummary
-    plan: dict[str, Any]  # Plan JSON as saved: shown as is, not re-validated
+class JourneyDetail(BaseModel):
+    journey: JourneyView
     history: list[HistoryEntry]
     request: str
     preferences: WalkPreferences
@@ -85,14 +116,16 @@ class AdminUser(BaseModel):
     name: str
     is_admin: bool
     created_at: datetime
-    trips: int
+    journeys: int
+    trips: int  # the days of those journeys: one route each
     cost_usd: float
 
 
-class AdminTrip(BaseModel):
+class AdminJourney(BaseModel):
     id: str
     title: str
     city: str
+    days: int
     owner_email: str
     updated_at: datetime
     cost_usd: float
@@ -101,17 +134,19 @@ class AdminTrip(BaseModel):
 _STATE = TypeAdapter(ResearchState)
 _WEATHER = TypeAdapter(list[HourWeather])
 _HISTORY = TypeAdapter(list[HistoryEntry])
-# Lists read only these columns: the research state, plan and route geometry of a trip
-# are tens to hundreds of kilobytes of JSON, and a list of trips needs none of it.
-_SUMMARY_ONLY = load_only(
-    Trip.title,
-    Trip.city,
-    Trip.date,
-    Trip.stops,
-    Trip.walk_km,
-    Trip.cost_usd,
-    Trip.created_at,
-    Trip.updated_at,
+_OUTLINE = TypeAdapter(list[DayOutline])
+# Lists read the days' copies of their plan totals: the research state, plan and
+# route geometry of a day are tens to hundreds of kilobytes of JSON, and a list
+# needs none of it.
+_DAY_TOTALS = (
+    select(
+        Trip.journey_id,
+        func.count().label("days"),
+        func.sum(Trip.stops).label("stops"),
+        func.round(func.sum(Trip.walk_km), 1).label("walk_km"),
+    )
+    .group_by(Trip.journey_id)
+    .subquery()
 )
 
 
@@ -275,18 +310,18 @@ class Store:
             )
         return result.rowcount > 0
 
-    # --- trips ---
+    # --- journeys ---
 
-    async def create_trip(
+    async def create_journey(
         self,
         user_id: int,
-        trip_run: TripRun,
+        journey: Journey,
         request: str,
         preferences: WalkPreferences,
         entry: HistoryEntry,
     ) -> None:
-        row = Trip(
-            id=trip_run.id,
+        row = JourneyRow(
+            id=journey.id,
             user_id=user_id,
             request=request,
             preferences=preferences.model_dump(mode="json"),
@@ -294,71 +329,102 @@ class Store:
             cost_usd=0.0,
             created_at=entry.at,
         )
-        _record_run(row, trip_run, entry)
+        _record_journey(row, journey, entry)
+        days = []
+        for index, run in enumerate(journey.days):
+            day = Trip(id=run.id, user_id=user_id, journey_id=journey.id, day_index=index)
+            _record_day(day, run)
+            days.append(day)
         async with self._db.begin() as s:
             s.add(row)
+            s.add_all(days)
 
-    async def update_trip(self, user_id: int, trip_run: TripRun, entry: HistoryEntry) -> None:
+    async def update_journey(self, user_id: int, journey: Journey, entry: HistoryEntry) -> None:
+        """Save feedback on the day `entry` names: that day's row and the journey's row
+        (the other days did not change)."""
+        if entry.day is None:
+            raise ValueError("feedback names the day it changed")
         async with self._db.begin() as s:
-            row = await self._owned_trip(s, user_id, trip_run.id)
-            if row is None:
-                raise LookupError(f"trip {trip_run.id} of user {user_id} is gone")
-            _record_run(row, trip_run, entry)
-
-    async def list_trips(self, user_id: int) -> list[TripSummary]:
-        async with self._db() as s:
-            rows = await s.scalars(
-                select(Trip)
-                .options(_SUMMARY_ONLY)
-                .where(Trip.user_id == user_id)
-                .order_by(Trip.updated_at.desc())
+            row = await self._owned_journey(s, user_id, journey.id)
+            day = await s.scalar(
+                select(Trip).where(Trip.journey_id == journey.id, Trip.day_index == entry.day)
             )
-            return [TripSummary.model_validate(row) for row in rows]
+            if row is None or day is None:
+                raise LookupError(f"day {entry.day} of journey {journey.id} of user {user_id}")
+            _record_journey(row, journey, entry)
+            _record_day(day, journey.days[entry.day])
 
-    async def get_trip(self, user_id: int, trip_id: str) -> TripDetail | None:
+    async def list_journeys(self, user_id: int) -> list[JourneySummary]:
         async with self._db() as s:
-            row = await self._owned_trip(s, user_id, trip_id)
-        if row is None:
+            rows = await s.execute(
+                select(
+                    JourneyRow.id,
+                    JourneyRow.title,
+                    JourneyRow.city,
+                    JourneyRow.date_from,
+                    JourneyRow.date_to,
+                    _DAY_TOTALS.c.days,
+                    _DAY_TOTALS.c.stops,
+                    _DAY_TOTALS.c.walk_km,
+                    JourneyRow.created_at,
+                    JourneyRow.updated_at,
+                )
+                .join(_DAY_TOTALS, _DAY_TOTALS.c.journey_id == JourneyRow.id)
+                .where(JourneyRow.user_id == user_id)
+                .order_by(JourneyRow.updated_at.desc())
+            )
+            return [JourneySummary(**row._mapping) for row in rows]
+
+    async def get_journey(self, user_id: int, journey_id: str) -> JourneyDetail | None:
+        found = await self._load(user_id, journey_id)
+        if found is None:
             return None
-        return TripDetail(
-            trip=TripSummary.model_validate(row),
-            plan=row.plan,
+        row, days = found
+        return JourneyDetail(
+            journey=journey_view(_journey(row, days)),
             history=_HISTORY.validate_python(row.history),
             request=row.request,
             preferences=WalkPreferences.model_validate(row.preferences),
         )
 
-    async def load_trip_run(self, user_id: int, trip_id: str) -> TripRun | None:
-        """The state a feedback run continues from."""
-        async with self._db() as s:
-            row = await self._owned_trip(s, user_id, trip_id)
-        if row is None:
-            return None
-        return TripRun(
-            id=row.id,
-            state=_STATE.validate_python(row.state),
-            weather=_WEATHER.validate_python(row.weather),
-            plan=Plan.model_validate(row.plan),
-        )
+    async def load_journey(self, user_id: int, journey_id: str) -> Journey | None:
+        """The journey a feedback run continues from: every day with its research state."""
+        found = await self._load(user_id, journey_id)
+        return _journey(*found) if found else None
 
-    async def delete_trip(self, user_id: int, trip_id: str) -> bool:
+    async def delete_journey(self, user_id: int, journey_id: str) -> bool:
+        """The days go with it (ON DELETE CASCADE); memory learned on them stays."""
         async with self._db.begin() as s:
             result = await s.execute(
-                delete(Trip).where(Trip.id == trip_id, Trip.user_id == user_id)
+                delete(JourneyRow).where(JourneyRow.id == journey_id, JourneyRow.user_id == user_id)
             )
         return result.rowcount > 0
 
+    async def _load(self, user_id: int, journey_id: str) -> tuple[JourneyRow, list[Trip]] | None:
+        async with self._db() as s:
+            row = await self._owned_journey(s, user_id, journey_id)
+            if row is None:
+                return None
+            days = await s.scalars(
+                select(Trip).where(Trip.journey_id == row.id).order_by(Trip.day_index)
+            )
+            return row, list(days)
+
     @staticmethod
-    async def _owned_trip(s: AsyncSession, user_id: int, trip_id: str) -> Trip | None:
-        # Someone else's trip and a missing one look the same: the API answers 404 to both.
-        return await s.scalar(select(Trip).where(Trip.id == trip_id, Trip.user_id == user_id))
+    async def _owned_journey(s: AsyncSession, user_id: int, journey_id: str) -> JourneyRow | None:
+        # Someone else's journey and a missing one look the same: the API answers 404 to both.
+        return await s.scalar(
+            select(JourneyRow).where(JourneyRow.id == journey_id, JourneyRow.user_id == user_id)
+        )
 
     # --- admin ---
 
     async def llm_cost_since(self, since: datetime) -> float:
         """LLM spend of the saved runs since `since` (failed runs are not saved)."""
         async with self._db() as s:
-            histories = await s.scalars(select(Trip.history).where(Trip.updated_at >= since))
+            histories = await s.scalars(
+                select(JourneyRow.history).where(JourneyRow.updated_at >= since)
+            )
             return sum(
                 (
                     entry.cost_usd
@@ -370,40 +436,56 @@ class Store:
             )
 
     async def totals(self) -> dict[str, int | float]:
+        """Journeys, and the day routes in them, in all and of journeys started today."""
         since = today_start()
+        new = func.count().filter(JourneyRow.created_at >= since)
         async with self._db() as s:
             users = await s.scalar(select(func.count()).select_from(User))
-            trips = await s.scalar(select(func.count()).select_from(Trip))
-            trips_today = await s.scalar(
-                select(func.count()).select_from(Trip).where(Trip.created_at >= since)
-            )
-            cost_total = await s.scalar(select(func.coalesce(func.sum(Trip.cost_usd), 0.0)))
+            journeys, journeys_today, cost_total = (
+                await s.execute(
+                    select(
+                        func.count(), new, func.coalesce(func.sum(JourneyRow.cost_usd), 0.0)
+                    ).select_from(JourneyRow)
+                )
+            ).one()
+            trips, trips_today = (
+                await s.execute(
+                    select(func.count(), new)
+                    .select_from(Trip)
+                    .join(JourneyRow, JourneyRow.id == Trip.journey_id)
+                )
+            ).one()
         return {
             "users": users or 0,
-            "trips": trips or 0,
-            "trips_today": trips_today or 0,
+            "journeys": journeys,
+            "journeys_today": journeys_today,
+            "trips": trips,
+            "trips_today": trips_today,
             "llm_cost_today": round(await self.llm_cost_since(since), 5),
-            "llm_cost_total": round(cost_total or 0.0, 5),
+            "llm_cost_total": round(cost_total, 5),
         }
 
     async def admin_users(self) -> list[AdminUser]:
-        per_user = (
+        journeys = (
             select(
-                Trip.user_id,
-                func.count().label("trips"),
-                func.sum(Trip.cost_usd).label("cost_usd"),
+                JourneyRow.user_id,
+                func.count().label("journeys"),
+                func.sum(JourneyRow.cost_usd).label("cost_usd"),
             )
-            .group_by(Trip.user_id)
+            .group_by(JourneyRow.user_id)
             .subquery()
         )
+        trips = select(Trip.user_id, func.count().label("trips")).group_by(Trip.user_id).subquery()
         async with self._db() as s:
             rows = await s.execute(
                 select(
                     User,
-                    func.coalesce(per_user.c.trips, 0),
-                    func.coalesce(per_user.c.cost_usd, 0.0),
+                    func.coalesce(journeys.c.journeys, 0),
+                    func.coalesce(trips.c.trips, 0),
+                    func.coalesce(journeys.c.cost_usd, 0.0),
                 )
-                .outerjoin(per_user, per_user.c.user_id == User.id)
+                .outerjoin(journeys, journeys.c.user_id == User.id)
+                .outerjoin(trips, trips.c.user_id == User.id)
                 .order_by(User.id)
             )
             return [
@@ -413,49 +495,115 @@ class Store:
                     name=user.name,
                     is_admin=user.is_admin,
                     created_at=user.created_at,
-                    trips=trips,
+                    journeys=n_journeys,
+                    trips=n_trips,
                     cost_usd=round(cost, 5),
                 )
-                for user, trips, cost in rows
+                for user, n_journeys, n_trips, cost in rows
             ]
 
-    async def admin_trips(self, limit: int = 50) -> list[AdminTrip]:
+    async def admin_journeys(self, limit: int = 50) -> list[AdminJourney]:
         async with self._db() as s:
             rows = await s.execute(
-                select(Trip, User.email)
-                .options(_SUMMARY_ONLY)
-                .join(User, User.id == Trip.user_id)
-                .order_by(Trip.updated_at.desc())
+                select(
+                    JourneyRow.id,
+                    JourneyRow.title,
+                    JourneyRow.city,
+                    _DAY_TOTALS.c.days,
+                    User.email.label("owner_email"),
+                    JourneyRow.updated_at,
+                    JourneyRow.cost_usd,
+                )
+                .join(User, User.id == JourneyRow.user_id)
+                .join(_DAY_TOTALS, _DAY_TOTALS.c.journey_id == JourneyRow.id)
+                .order_by(JourneyRow.updated_at.desc())
                 .limit(limit)
             )
             return [
-                AdminTrip(
-                    id=trip.id,
-                    title=trip.title,
-                    city=trip.city,
-                    owner_email=email,
-                    updated_at=trip.updated_at,
-                    cost_usd=round(trip.cost_usd, 5),
-                )
-                for trip, email in rows
+                AdminJourney(**{**row._mapping, "cost_usd": round(row.cost_usd, 5)}) for row in rows
             ]
 
 
-def _record_run(row: Trip, trip_run: TripRun, entry: HistoryEntry) -> None:
-    """Copy a finished run into the trip row: the new plan, its state, one history line."""
-    plan = trip_run.plan
-    if plan is None:
-        raise ValueError("only a run that produced a plan is saved")
-    brief = trip_run.state.brief
-    row.title = plan.title or f"{brief.city}, {brief.date:%d.%m.%Y}"
-    row.city = brief.city
-    row.date = brief.date
-    row.stops = len(plan.stops)
-    row.walk_km = round(plan.total_walk_m / 1000, 1)
-    row.state = _STATE.dump_python(trip_run.state, mode="json")
-    row.weather = _WEATHER.dump_python(trip_run.weather, mode="json")
-    row.plan = plan.model_dump(mode="json")
+def journey_view(journey: Journey) -> JourneyView:
+    date_from, date_to = _dates(journey.brief)
+    return JourneyView(
+        id=journey.id,
+        title=journey.title,
+        city=journey.brief.city,
+        date_from=date_from,
+        date_to=date_to,
+        start=journey.start,
+        outline=journey.outline,
+        days=[
+            DayView(
+                trip_id=run.id,
+                index=day.index,
+                date=day.date,
+                theme=day.theme,
+                area=day.area,
+                plan=run.plan,
+            )
+            for day, run in zip(journey.outline, journey.days, strict=True)
+        ],
+    )
+
+
+def _dates(brief: TripBrief) -> tuple[date, date]:
+    return brief.date, brief.date_to or brief.date
+
+
+def _record_journey(row: JourneyRow, journey: Journey, entry: HistoryEntry) -> None:
+    """Copy a finished run into the journey's row: what the journey is now, one history line."""
+    row.title = journey.title
+    row.city = journey.brief.city
+    row.date_from, row.date_to = _dates(journey.brief)
+    row.brief = journey.brief.model_dump(mode="json")
+    row.start = journey.start.model_dump(mode="json")
+    row.outline = _OUTLINE.dump_python(journey.outline, mode="json")
     # A new list, not append(): plain JSON columns do not track in-place changes.
     row.history = [*row.history, entry.model_dump(mode="json")]
     row.cost_usd += entry.cost_usd
     row.updated_at = entry.at
+
+
+def _record_day(row: Trip, run: TripRun) -> None:
+    plan = run.plan
+    if plan is None:
+        raise ValueError("only a day that has a route is saved")
+    row.date = plan.brief.date
+    row.stops = len(plan.stops)
+    row.walk_km = round(plan.total_walk_m / 1000, 1)
+    row.state = _saved_state(run.state, plan)
+    row.weather = _WEATHER.dump_python(run.weather, mode="json")
+    row.plan = plan.model_dump(mode="json")
+
+
+def _saved_state(state: ResearchState, plan: Plan) -> dict[str, Any]:
+    """The day's state with the part of the shared registry it refers to."""
+    kept = {*state.shortlist, *state.excluded, *(stop.place.id for stop in plan.stops)}
+    registry = {pid: place for pid, place in state.registry.items() if pid in kept}
+    return _STATE.dump_python(replace(state, registry=registry), mode="json")
+
+
+def _journey(row: JourneyRow, days: list[Trip]) -> Journey:
+    runs = [
+        TripRun(
+            id=day.id,
+            state=_STATE.validate_python(day.state),
+            weather=_WEATHER.validate_python(day.weather),
+            plan=Plan.model_validate(day.plan),
+        )
+        for day in days
+    ]
+    registry = {pid: place for run in runs for pid, place in run.state.registry.items()}
+    for run in runs:
+        run.state.registry = registry
+    return Journey(
+        id=row.id,
+        brief=TripBrief.model_validate(row.brief),
+        start=GeoPoint.model_validate(row.start),
+        title=row.title,
+        outline=_OUTLINE.validate_python(row.outline),
+        days=runs,
+        learned=[],
+    )

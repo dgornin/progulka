@@ -22,6 +22,8 @@ const FALLBACK = {
   403: "Недостаточно прав",
   404: "Не найдено",
   409: "Конфликт: действие уже выполняется",
+  // the proxy refuses an oversized body (a long voice recording) before the app sees it
+  413: "Слишком большой запрос",
   429: "Слишком много запросов, попробуйте чуть позже",
 };
 

@@ -1,9 +1,9 @@
 """Long-term memory: durable facts about the traveller learned from what they write.
 
-Two kinds of memory (lecture 07). Working memory is one walk's ResearchState: the
+Two kinds of memory (lecture 07). Working memory is a day's ResearchState: the
 places found, the shortlist, the rejected stops; it lives with the trip and dies with
 it. Long-term memory is a short list of facts about the person ("не любит музеи",
-"гуляет с ребёнком 8 лет") that outlives the trip and shapes every next walk.
+"гуляет с ребёнком 8 лет") that outlives the trip and shapes every next one.
 
 What is written, and when: after a successful run, one structured LLM call reads only
 the traveller's own words of that run (the request, or the feedback) and returns at

@@ -1,8 +1,16 @@
 # Public entry point: automatic HTTPS for SITE_ADDRESS, proxy to the app container.
 {$SITE_ADDRESS} {
-	# Caddy has no default limit, and the app reads a body whole before validating it;
-	# the largest real body, a planner form, is a few kilobytes.
-	request_body {
+	# Caddy has no default limit, and the app reads a body whole before validating it.
+	# The largest body is a voice recording to transcribe: up to a minute of 16 kHz WAV,
+	# about 2.6 MB as base64; every other body is a form of a few kilobytes.
+	@transcribe path /api/transcribe
+	request_body @transcribe {
+		max_size 4MB
+	}
+	@other {
+		not path /api/transcribe
+	}
+	request_body @other {
 		max_size 64KB
 	}
 	reverse_proxy progulka:8000 {

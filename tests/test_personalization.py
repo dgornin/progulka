@@ -170,7 +170,7 @@ async def test_empty_request_makes_no_llm_call() -> None:
         "relaxed",
         TODAY,
     )
-    assert (brief.start_time, brief.end_time, brief.interests) == (time(10), time(15), [])
+    assert (brief.start_time, brief.end_time, brief.interests) == (time(10), time(18), [])
 
 
 async def test_brief_prompt_offers_the_catalog_labels() -> None:

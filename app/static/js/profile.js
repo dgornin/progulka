@@ -387,7 +387,7 @@ function memorySection() {
   return section(
     "memory",
     "Что агент помнит о вас",
-    "Агент сам замечает предпочтения в ваших запросах и правках — «не люблю очереди», «хожу быстро» — и учитывает их в следующих прогулках. Любой факт можно удалить.",
+    "Агент сам замечает предпочтения в ваших запросах и правках — «не люблю очереди», «хожу быстро» — и учитывает их в следующих поездках. Любой факт можно удалить.",
     list,
   );
 }
@@ -412,7 +412,7 @@ function renderProfile(user) {
     section(
       "interests",
       "Интересы",
-      "Из чего собирать ваши прогулки. В планировщике для отдельной прогулки можно попросить больше или меньше чего-то.",
+      "Из чего собирать маршруты ваших поездок. В планировщике для отдельного путешествия можно попросить больше или меньше чего-то.",
       interestChips(),
     ),
     section("avoid", "Не предлагать", "Это агент не будет ставить в маршрут, даже если место знаменитое.", avoidChips()),
@@ -453,7 +453,7 @@ function renderProfile(user) {
         "div",
         {},
         h("p", { class: "eyebrow" }, "Профиль"),
-        h("h1", { class: "title" }, "Что вы любите в прогулках"),
+        h("h1", { class: "title" }, "Что вы любите в поездках"),
         h("p", { class: "muted" }, `${user.name || "Без имени"} · ${user.email}`),
       ),
     ),
@@ -530,7 +530,7 @@ function renderOnboarding(user) {
       item.toggleAttribute("aria-current", i === index);
     });
     back.hidden = index === 0;
-    next.textContent = index === STEPS.length - 1 ? "Готово — к первой прогулке" : "Далее";
+    next.textContent = index === STEPS.length - 1 ? "Готово — к первому путешествию" : "Далее";
     if (moveFocus) {
       // the new step's heading takes focus, so a screen reader announces the step
       panels[index].querySelector("h2").focus({ preventScroll: true });

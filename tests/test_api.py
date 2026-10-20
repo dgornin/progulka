@@ -1,50 +1,66 @@
 """The HTTP API end to end: the real store on a temporary SQLite file, a fake pipeline."""
 
+import asyncio
+import base64
+import io
 import json
+import wave
 from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import main
-from app.limits import Limits, SlidingWindow
+from app.auth import hash_password
+from app.limits import BUDGET_SPENT, HOUR_S, Limits, SlidingWindow
 from app.models import AgentEvent
-from app.pipeline import PipelineError
+from app.pipeline import TOO_MANY_DAYS, PipelineError
 
 DEMO = ("demo@progulka.app", "progulka-demo")
 ADMIN = ("admin@progulka.app", "admin-secret-1")
 PASSWORD = "secret-123"
+THREE_DAYS = {
+    "request": "Три дня в Петербурге, хочу стрит-арт",
+    "date_from": "2026-10-24",
+    "date_to": "2026-10-26",
+    "preferences": {"more": ["street_art"]},
+}
 
 
 class FakePipeline:
-    """Stands in for plan_trip and apply_feedback: records its inputs, spends a cent."""
+    """Stands in for plan_journey and apply_day_feedback: records its inputs, spends a cent."""
 
-    def __init__(self, make_trip_run):
-        self.make_trip_run = make_trip_run
+    def __init__(self, make_journey):
+        self.make_journey = make_journey
         self.calls: list[dict] = []
         self.learned = ["Любит конструктивизм"]
         self.error: Exception | None = None
 
-    async def plan_trip(self, req, llm, emit, today, profile=None, memory=None):
+    async def plan_journey(self, req, llm, emit, today, profile=None, memory=None):
         self.calls.append({"req": req, "profile": profile, "memory": memory})
         await emit(AgentEvent(type="stage", data={"name": "brief", "status": "start"}))
         llm.usage.cost_usd += 0.01
         if self.error:
             raise self.error
-        trip_run = self.make_trip_run(trip_id=f"trip{len(self.calls)}")
-        trip_run.learned = list(self.learned)
-        return trip_run
+        days = (req.date_to - req.date_from).days + 1 if req.date_to else 1
+        journey = self.make_journey(f"j{len(self.calls)}", days=days)
+        journey.learned = list(self.learned)
+        return journey
 
-    async def apply_feedback(self, trip_run, req, llm, emit, profile=None, memory=None):
-        self.calls.append({"trip_run": trip_run, "req": req, "memory": memory})
+    async def apply_day_feedback(
+        self, journey, day_index, req, llm, emit, profile=None, memory=None
+    ):
+        self.calls.append({"journey": journey, "day": day_index, "req": req, "memory": memory})
+        stage = {"name": "feedback", "status": "start", "day": day_index}
+        await emit(AgentEvent(type="stage", data=stage))
         llm.usage.cost_usd += 0.002
-        plan = trip_run.plan
+        plan = journey.days[day_index].plan
         plan.stops = [s for s in plan.stops if s.place.id not in req.exclude_place_ids]
         plan.title = "Без лишнего"
         if self.error:
             raise self.error  # after changing the loaded state, as a real failure can
-        trip_run.learned = ["Не любит толпы"]
-        return trip_run, "Убрал"
+        journey.learned = ["Не любит толпы"]
+        return journey, "Убрал"
 
 
 def _settings(tmp_path, **changes):
@@ -64,11 +80,24 @@ def _settings(tmp_path, **changes):
 
 
 @pytest.fixture
-def pipeline(make_trip_run, monkeypatch):
-    fake = FakePipeline(make_trip_run)
-    monkeypatch.setattr(main, "plan_trip", fake.plan_trip)
-    monkeypatch.setattr(main, "apply_feedback", fake.apply_feedback)
+def pipeline(make_journey, monkeypatch):
+    fake = FakePipeline(make_journey)
+    monkeypatch.setattr(main, "plan_journey", fake.plan_journey)
+    monkeypatch.setattr(main, "apply_day_feedback", fake.apply_day_feedback)
     return fake
+
+
+@pytest.fixture
+def speech(monkeypatch):
+    """Stands in for the speech model: records what it was sent, spends a tenth of a cent."""
+    received: list[str] = []
+
+    async def transcribe(llm, audio):
+        received.append(audio)
+        return "Три дня в Казани", 0.001
+
+    monkeypatch.setattr(main, "transcribe", transcribe)
+    return received
 
 
 def _fresh_throttles(monkeypatch, registrations=None, logins=None):
@@ -78,6 +107,7 @@ def _fresh_throttles(monkeypatch, registrations=None, logins=None):
     monkeypatch.setattr(
         main, "registrations", SlidingWindow(registrations or main.REGISTRATIONS, window)
     )
+    monkeypatch.setattr(main, "transcriptions", SlidingWindow(main.TRANSCRIPTIONS_PER_HOUR, HOUR_S))
 
 
 @pytest.fixture
@@ -85,7 +115,7 @@ def client(tmp_path, monkeypatch, pipeline):
     monkeypatch.setattr(main, "settings", _settings(tmp_path))
     monkeypatch.setattr(main, "limits", Limits(0, 0, 0))
     _fresh_throttles(monkeypatch)
-    monkeypatch.setattr(main, "busy_trips", set())
+    monkeypatch.setattr(main, "busy_journeys", set())
     with TestClient(main.app) as test_client:
         yield test_client
 
@@ -110,12 +140,33 @@ def _events(response):
     return [json.loads(line) for line in response.text.splitlines()]
 
 
-def _plan_data(response):
-    [event] = [e for e in _events(response) if e["type"] == "plan"]
+def _journey_data(response):
+    [event] = [e for e in _events(response) if e["type"] == "journey"]
     return event["data"]
 
 
-def test_traveller_plans_continues_and_deletes_a_trip(client, pipeline):
+def _feedback(client, journey_id="j1", day=0, **body):
+    return client.post(f"/api/journeys/{journey_id}/days/{day}/feedback", json=body)
+
+
+def _wav(seconds=1.0, rate=16_000, channels=1):
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(bytes(2 * channels * int(seconds * rate)))
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+def _overrun_wav():
+    """A WAV whose format chunk claims a megabyte the file does not have."""
+    data = bytearray(base64.b64decode(_wav()))
+    data[16:20] = (1 << 20).to_bytes(4, "little")
+    return base64.b64encode(data).decode()
+
+
+def test_traveller_plans_continues_and_deletes_a_journey(client, pipeline):
     user = _register(client)
     assert user["name"] == "Анна" and not user["onboarded"] and not user["is_admin"]
     assert client.get("/api/me").json()["user"]["email"] == "anna@example.com"
@@ -125,56 +176,72 @@ def test_traveller_plans_continues_and_deletes_a_trip(client, pipeline):
     assert client.get("/api/me").json()["user"]["onboarded"]
     assert client.get("/api/profile").json()["interests"] == {"nature": 1.0, "coffee": 0.6}
 
-    request = {"request": "Суббота, хочу стрит-арт", "preferences": {"more": ["street_art"]}}
-    events = _events(client.post("/api/plan", json=request))
-    assert [e["type"] for e in events] == ["stage", "plan", "done"]
-    plan = events[1]["data"]
-    assert plan["trip_id"] == "trip1" and plan["reply"] is None
-    assert plan["learned"] == ["Любит конструктивизм"]
-    assert plan["usage"]["cost_usd"] == 0.01
+    events = _events(client.post("/api/plan", json=THREE_DAYS))
+    assert [e["type"] for e in events] == ["stage", "journey", "done"]
+    data = events[1]["data"]
+    assert (data["journey_id"], data["reply"], data["learned"]) == (
+        "j1",
+        None,
+        ["Любит конструктивизм"],
+    )
+    assert data["usage"]["cost_usd"] == 0.01
+    view = data["journey"]
+    assert (view["id"], view["date_from"], view["date_to"]) == ("j1", "2026-10-24", "2026-10-26")
+    assert [(d["index"], d["trip_id"], d["date"], d["theme"]) for d in view["days"]] == [
+        (0, "j1-0", "2026-10-24", "Тема дня 1"),
+        (1, "j1-1", "2026-10-25", "Тема дня 2"),
+        (2, "j1-2", "2026-10-26", "Тема дня 3"),
+    ]
+    assert [len(d["plan"]["stops"]) for d in view["days"]] == [2, 2, 2]
+    assert len(view["outline"]) == 3 and view["start"]["lat"] == 59.93
     assert pipeline.calls[0]["profile"].home_city == "Казань"
     assert pipeline.calls[0]["memory"] == []
 
-    [summary] = client.get("/api/trips").json()
-    assert (summary["id"], summary["title"], summary["stops"]) == (
-        "trip1",
-        "Конструктивизм и кофе",
-        2,
+    [summary] = client.get("/api/journeys").json()
+    assert (summary["id"], summary["title"], summary["days"], summary["stops"]) == (
+        "j1",
+        "Петербург",
+        3,
+        6,
     )
     assert [m["text"] for m in client.get("/api/memory").json()] == ["Любит конструктивизм"]
 
-    feedback = client.post("/api/trips/trip1/feedback", json={"exclude_place_ids": ["osm:node/1"]})
-    plan = _plan_data(feedback)
-    assert (plan["trip_id"], plan["reply"], plan["learned"]) == (
-        "trip1",
-        "Убрал",
-        ["Не любит толпы"],
-    )
-    # Feedback continued the saved research state, with the memory as context.
-    assert pipeline.calls[1]["trip_run"].state.excluded == {"osm:node/3"}
-    assert pipeline.calls[1]["memory"] == ["Любит конструктивизм"]
+    events = _events(_feedback(client, day=1, exclude_place_ids=["osm:node/11"]))
+    # The day's events say which day they are about; the final event, the journey.
+    assert events[0]["data"]["day"] == 1
+    data = _journey_data(_feedback(client, day=2, feedback="без соборов"))
+    assert (data["journey_id"], data["reply"], data["learned"]) == ("j1", "Убрал", [])
+    assert [len(d["plan"]["stops"]) for d in data["journey"]["days"]] == [2, 1, 2]
+    # Feedback continued the saved journey: every day with its research state, the
+    # days sharing one registry again, the memory as context.
+    first_feedback = pipeline.calls[1]
+    assert first_feedback["day"] == 1 and len(first_feedback["journey"].days) == 3
+    assert first_feedback["journey"].days[1].state.excluded == {"osm:node/13"}
+    assert "osm:node/1" in first_feedback["journey"].days[1].state.registry
+    assert first_feedback["memory"] == ["Любит конструктивизм"]
 
-    detail = client.get("/api/trips/trip1").json()
-    assert (detail["trip"]["title"], detail["trip"]["stops"]) == ("Без лишнего", 1)
-    assert [(h["kind"], h["text"], h["reply"]) for h in detail["history"]] == [
-        ("plan", "Суббота, хочу стрит-арт", None),
-        ("feedback", "Убрать: Место 1", "Убрал"),
+    detail = client.get("/api/journeys/j1").json()
+    assert detail["journey"]["days"][1]["plan"]["title"] == "Без лишнего"
+    assert [(h["kind"], h["day"], h["text"], h["reply"]) for h in detail["history"]] == [
+        ("plan", None, "Три дня в Петербурге, хочу стрит-арт", None),
+        ("feedback", 1, "Убрать: Место 11", "Убрал"),
+        ("feedback", 2, "без соборов", "Убрал"),
     ]
-    assert [h["cost_usd"] for h in detail["history"]] == [0.01, 0.002]
-    assert len(detail["plan"]["stops"]) == 1
+    assert [h["cost_usd"] for h in detail["history"]] == [0.01, 0.002, 0.002]
     assert detail["preferences"]["more"] == ["street_art"]
+    assert detail["request"] == THREE_DAYS["request"]
 
-    assert client.delete("/api/trips/trip1").status_code == 204
-    assert client.get("/api/trips").json() == []
-    assert client.get("/api/trips/trip1").status_code == 404
-    assert client.post("/api/trips/trip1/feedback", json={"feedback": "ещё"}).status_code == 404
+    assert client.delete("/api/journeys/j1").status_code == 204
+    assert client.get("/api/journeys").json() == []
+    assert client.get("/api/journeys/j1").status_code == 404
+    assert _feedback(client, feedback="ещё").status_code == 404
 
 
 def test_known_facts_are_not_reported_as_learned_again(client):
     _register(client)
-    _plan_data(client.post("/api/plan", json={"request": "Прогулка по Петербургу"}))
+    _journey_data(client.post("/api/plan", json={"request": "Прогулка по Петербургу"}))
 
-    again = _plan_data(client.post("/api/plan", json={"request": "Ещё одна"}))
+    again = _journey_data(client.post("/api/plan", json={"request": "Ещё одна"}))
 
     assert again["learned"] == []
     assert len(client.get("/api/memory").json()) == 1
@@ -188,75 +255,89 @@ def test_a_failed_run_saves_nothing(client, pipeline):
 
     assert [e["type"] for e in events] == ["stage", "error", "done"]
     assert events[1]["data"]["message"].startswith("Не нашёл город")
-    assert client.get("/api/trips").json() == []
+    assert client.get("/api/journeys").json() == []
 
 
-def test_a_failed_feedback_leaves_the_saved_trip_as_it_was(client, pipeline):
+def test_a_failed_feedback_leaves_the_saved_journey_as_it_was(client, pipeline):
     _register(client)
-    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
-    saved = client.get("/api/trips/trip1").json()
+    _journey_data(client.post("/api/plan", json=THREE_DAYS))
+    saved = client.get("/api/journeys/j1").json()
     pipeline.error = PipelineError("Не удалось собрать маршрут")
 
-    feedback = {"exclude_place_ids": ["osm:node/1"]}
-    events = _events(client.post("/api/trips/trip1/feedback", json=feedback))
+    events = _events(_feedback(client, day=1, exclude_place_ids=["osm:node/11"]))
 
-    assert [e["type"] for e in events] == ["error", "done"]
-    assert client.get("/api/trips/trip1").json() == saved
+    assert [e["type"] for e in events] == ["stage", "error", "done"]
+    assert client.get("/api/journeys/j1").json() == saved
 
 
-def test_someone_elses_trip_and_memory_look_missing(client):
+def test_someone_elses_journey_and_memory_look_missing(client):
     _register(client)
-    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+    _journey_data(client.post("/api/plan", json={"request": "Прогулка"}))
     [fact] = client.get("/api/memory").json()
 
     _register(client, "boris@example.com", "Борис")
 
-    assert client.get("/api/trips").json() == []
-    assert client.get("/api/trips/trip1").status_code == 404
-    assert client.delete("/api/trips/trip1").status_code == 404
-    assert client.post("/api/trips/trip1/feedback", json={"feedback": "x"}).status_code == 404
+    assert client.get("/api/journeys").json() == []
+    assert client.get("/api/journeys/j1").status_code == 404
+    assert client.delete("/api/journeys/j1").status_code == 404
+    assert _feedback(client, feedback="x").status_code == 404
     assert client.delete(f"/api/memory/{fact['id']}").status_code == 404
     assert _login(client, "anna@example.com", PASSWORD).status_code == 200
-    assert len(client.get("/api/trips").json()) == 1
+    assert len(client.get("/api/journeys").json()) == 1
 
 
-def test_a_trip_being_rebuilt_refuses_feedback_and_delete(client):
+@pytest.mark.parametrize("day", [3, -1])
+def test_feedback_on_a_day_the_journey_does_not_have(client, pipeline, day):
     _register(client)
-    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
-    main.busy_trips.add("trip1")
+    _journey_data(client.post("/api/plan", json=THREE_DAYS))
 
-    feedback = client.post("/api/trips/trip1/feedback", json={"feedback": "без соборов"})
+    response = _feedback(client, day=day, feedback="без соборов")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": main.DAY_NOT_FOUND}
+    assert len(pipeline.calls) == 1 and main.busy_journeys == set()
+
+
+def test_a_journey_being_rebuilt_refuses_feedback_and_delete(client):
+    _register(client)
+    _journey_data(client.post("/api/plan", json=THREE_DAYS))
+    main.busy_journeys.add("j1")
+
+    # Any day: the run on day 0 must not lose the places it takes to day 2.
+    feedback = _feedback(client, day=2, feedback="без соборов")
 
     assert feedback.status_code == 409
-    assert feedback.json() == {"detail": "Маршрут уже перестраивается"}
-    assert client.delete("/api/trips/trip1").status_code == 409
+    assert feedback.json() == {"detail": "Путешествие уже перестраивается"}
+    assert client.delete("/api/journeys/j1").status_code == 409
 
 
 def test_removing_a_stop_that_is_already_gone_uses_no_run(client, pipeline, monkeypatch):
     monkeypatch.setattr(main, "limits", Limits(per_hour=2, daily_budget_usd=0, max_concurrent=0))
     _register(client)
-    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+    _journey_data(client.post("/api/plan", json=THREE_DAYS))
 
-    # As from a second tab, where the stop was removed by an earlier run.
-    stale = client.post("/api/trips/trip1/feedback", json={"exclude_place_ids": ["osm:node/9"]})
+    # As from a second tab, where the stop was removed by an earlier run; or a stop of
+    # another day.
+    for stale in ("osm:node/9", "osm:node/1"):
+        response = _feedback(client, day=1, exclude_place_ids=[stale])
+        assert response.status_code == 409
+        assert response.json() == {"detail": "Этого места уже нет в маршруте"}
 
-    assert stale.status_code == 409
-    assert stale.json() == {"detail": "Этого места уже нет в маршруте"}
-    assert len(pipeline.calls) == 1 and main.busy_trips == set()
-    _plan_data(client.post("/api/trips/trip1/feedback", json={"feedback": "без соборов"}))
+    assert len(pipeline.calls) == 1 and main.busy_journeys == set()
+    _journey_data(_feedback(client, day=1, feedback="без соборов"))
 
 
 def test_runs_are_rate_limited_per_address(client, monkeypatch):
     monkeypatch.setattr(main, "limits", Limits(per_hour=1, daily_budget_usd=0, max_concurrent=0))
     _register(client)
-    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+    _journey_data(client.post("/api/plan", json=THREE_DAYS))  # three days, one run
 
     refused = client.post("/api/plan", json={"request": "Ещё"})
-    feedback = client.post("/api/trips/trip1/feedback", json={"feedback": "без соборов"})
+    feedback = _feedback(client, feedback="без соборов")
 
     assert refused.status_code == 429 and "в час" in refused.json()["detail"]
     assert feedback.status_code == 429
-    assert main.busy_trips == set()  # a refused feedback does not leave the trip locked
+    assert main.busy_journeys == set()  # a refused feedback does not leave the journey locked
 
 
 def test_an_empty_form_is_refused_before_it_uses_a_run(client, monkeypatch):
@@ -264,19 +345,112 @@ def test_an_empty_form_is_refused_before_it_uses_a_run(client, monkeypatch):
     _register(client)  # no home city in a fresh profile
 
     empty = client.post("/api/plan", json={"request": "  "})
-    _plan_data(client.post("/api/plan", json={"request": "", "city": "Казань"}))
+    _journey_data(client.post("/api/plan", json={"request": "", "city": "Казань"}))
 
     assert empty.status_code == 422 and "укажите город" in empty.json()["detail"]
 
 
-def test_a_window_that_ends_before_it_starts_is_one_russian_sentence(client):
+@pytest.mark.parametrize(
+    ("form", "detail"),
+    [
+        ({"start_time": "12:00", "end_time": "11:00"}, "Конец прогулки должен быть позже начала"),
+        ({"date_from": "2026-10-24", "date_to": "2026-11-01"}, TOO_MANY_DAYS),
+    ],
+)
+def test_a_wrong_form_is_one_russian_sentence(client, form, detail):
     _register(client)
-    window = {"city": "Казань", "start_time": "12:00", "end_time": "11:00"}
 
-    response = client.post("/api/plan", json=window)
+    response = client.post("/api/plan", json={"city": "Казань", **form})
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "Конец прогулки должен быть позже начала"
+    assert response.json()["detail"] == detail
+
+
+def test_an_old_trip_opens_as_a_journey_after_the_upgrade(
+    tmp_path, monkeypatch, pipeline, make_legacy_database
+):
+    make_legacy_database(tmp_path / "api.db", asyncio.run(hash_password(PASSWORD)))
+    _fresh_throttles(monkeypatch)
+    monkeypatch.setattr(main, "settings", _settings(tmp_path))
+    monkeypatch.setattr(main, "busy_journeys", set())
+    with TestClient(main.app) as client:
+        assert _login(client, "anna@example.com", PASSWORD).status_code == 200
+
+        assert client.get("/app/trips/trip1").status_code == 200  # the old link
+        detail = client.get("/api/journeys/trip1").json()
+        assert [d["trip_id"] for d in detail["journey"]["days"]] == ["trip1"]
+        assert [h["day"] for h in detail["history"]] == [None, 0]
+        data = _journey_data(_feedback(client, "trip1", exclude_place_ids=["osm:node/1"]))
+        assert len(data["journey"]["days"][0]["plan"]["stops"]) == 1
+        assert [m["text"] for m in client.get("/api/memory").json()] == [
+            "Не любит толпы",
+            "Любит кофе",
+        ]
+
+
+def test_voice_is_transcribed_and_its_cost_counts_toward_the_budget(client, speech, monkeypatch):
+    monkeypatch.setattr(main, "limits", Limits(0, daily_budget_usd=0.001, max_concurrent=0))
+    _register(client)
+    audio = _wav(seconds=60)  # the longest the recorder sends
+
+    response = client.post("/api/transcribe", json={"audio": audio})
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "Три дня в Казани"}
+    assert speech == [audio]
+    for refused in (
+        client.post("/api/transcribe", json={"audio": audio}),
+        client.post("/api/plan", json={"request": "Три дня в Казани"}),
+    ):
+        assert refused.status_code == 429
+        assert refused.json() == {"detail": BUDGET_SPENT}
+
+
+def test_transcriptions_have_a_window_per_address(client, speech, monkeypatch):
+    monkeypatch.setattr(main, "transcriptions", SlidingWindow(1, HOUR_S))
+    _register(client)
+    assert client.post("/api/transcribe", json={"audio": _wav()}).status_code == 200
+
+    refused = client.post("/api/transcribe", json={"audio": _wav()})
+
+    assert refused.status_code == 429 and "голосовых вводов в час" in refused.json()["detail"]
+    assert client.post("/api/plan", json={"request": "Прогулка"}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("audio", "status", "detail"),
+    [
+        (_wav(seconds=62), 413, "Запись длиннее минуты"),
+        ("A" * 3_400_000, 413, "Запись длиннее минуты"),
+        ("это не base64", 422, "Запись не похожа на WAV"),
+        (base64.b64encode(b"RIFF....OggS").decode(), 422, "Запись не похожа на WAV"),
+        (_overrun_wav(), 422, "Запись не похожа на WAV"),
+        (_wav(rate=44_100), 422, "Нужна запись WAV 16 кГц, моно, 16 бит"),
+        (_wav(channels=2), 422, "Нужна запись WAV 16 кГц, моно, 16 бит"),
+        (_wav(seconds=0), 422, "Запись пустая"),
+    ],
+)
+def test_a_recording_the_recorder_never_sends_costs_nothing(client, speech, audio, status, detail):
+    _register(client)
+
+    response = client.post("/api/transcribe", json={"audio": audio})
+
+    assert response.status_code == status
+    assert response.json() == {"detail": detail}
+    assert speech == []
+
+
+def test_a_failed_transcription_says_what_happened(client, monkeypatch):
+    async def transcribe(llm, audio):
+        raise PipelineError("Распознавание речи не ответило вовремя, попробуйте ещё раз")
+
+    monkeypatch.setattr(main, "transcribe", transcribe)
+    _register(client)
+
+    response = client.post("/api/transcribe", json={"audio": _wav()})
+
+    assert response.status_code == 502
+    assert response.json()["detail"].startswith("Распознавание речи не ответило")
 
 
 @pytest.mark.parametrize(
@@ -285,13 +459,16 @@ def test_a_window_that_ends_before_it_starts_is_one_russian_sentence(client):
         ("get", "/api/me"),
         ("get", "/api/profile"),
         ("get", "/api/memory"),
-        ("get", "/api/trips"),
+        ("get", "/api/journeys"),
+        ("get", "/api/journeys/j1"),
+        ("delete", "/api/journeys/j1"),
         ("post", "/api/plan"),
-        ("post", "/api/trips/trip1/feedback"),
+        ("post", "/api/journeys/j1/days/0/feedback"),
+        ("post", "/api/transcribe"),
     ],
 )
 def test_signed_out_requests_are_refused(client, method, path):
-    response = client.request(method, path, json={"request": "Прогулка"})
+    response = client.request(method, path, json={"request": "Прогулка", "audio": _wav()})
     assert response.status_code == 401
     assert response.json() == {"detail": "Нужно войти"}
 
@@ -395,14 +572,16 @@ def test_demo_account_is_ready_to_use(client):
 
 def test_admin_pages_are_for_the_admin_only(client):
     _register(client)
-    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+    two_days = {"request": "Выходные", "date_from": "2026-10-24", "date_to": "2026-10-25"}
+    _journey_data(client.post("/api/plan", json=two_days))
     for path in ("/api/admin/stats", "/api/admin/users", "/api/admin/trips"):
         assert client.get(path).status_code == 403
 
     assert _login(client, *ADMIN).json()["user"]["is_admin"]
 
     stats = client.get("/api/admin/stats").json()
-    assert (stats["users"], stats["trips"], stats["trips_today"]) == (3, 1, 1)
+    assert (stats["users"], stats["journeys"], stats["journeys_today"]) == (3, 1, 1)
+    assert (stats["trips"], stats["trips_today"]) == (2, 2)  # the days: one route each
     assert stats["llm_cost_today"] == stats["llm_cost_total"] == 0.01
     assert stats["limits"] == {
         "per_hour": 0,
@@ -411,11 +590,13 @@ def test_admin_pages_are_for_the_admin_only(client):
         "running": 0,
     }
     users = {u["email"]: u for u in client.get("/api/admin/users").json()}
-    assert users["anna@example.com"]["trips"] == 1 and users[ADMIN[0]]["is_admin"]
-    [trip] = client.get("/api/admin/trips").json()
-    assert (trip["id"], trip["owner_email"], trip["cost_usd"]) == (
-        "trip1",
+    assert (users["anna@example.com"]["journeys"], users["anna@example.com"]["trips"]) == (1, 2)
+    assert users[ADMIN[0]]["is_admin"]
+    [journey] = client.get("/api/admin/trips").json()
+    assert (journey["id"], journey["owner_email"], journey["days"], journey["cost_usd"]) == (
+        "j1",
         "anna@example.com",
+        2,
         0.01,
     )
 
@@ -467,23 +648,26 @@ def test_admin_rights_follow_the_env_across_restarts(tmp_path, monkeypatch, pipe
         assert not _login(client, *new_admin).json()["user"]["is_admin"]
 
 
-def test_feedback_continues_a_trip_saved_before_a_restart(tmp_path, monkeypatch, pipeline):
+def test_feedback_continues_a_journey_saved_before_a_restart(tmp_path, monkeypatch, pipeline):
     _fresh_throttles(monkeypatch)
     monkeypatch.setattr(main, "settings", _settings(tmp_path))
+    monkeypatch.setattr(main, "busy_journeys", set())
     with TestClient(main.app) as client:
         _register(client)
-        _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+        _journey_data(client.post("/api/plan", json=THREE_DAYS))
         cookie = client.cookies.get("progulka_session")
 
     with TestClient(main.app) as client:
         client.cookies.set("progulka_session", cookie)
-        feedback = client.post("/api/trips/trip1/feedback", json={"feedback": "без соборов"})
+        feedback = _feedback(client, day=1, feedback="без соборов")
 
-        assert _plan_data(feedback)["reply"] == "Убрал"
-        restored = pipeline.calls[1]["trip_run"]
-        assert restored.state.excluded == {"osm:node/3"} and len(restored.state.registry) == 3
-        history = client.get("/api/trips/trip1").json()["history"]
-        assert [h["text"] for h in history] == ["Прогулка", "без соборов"]
+        assert _journey_data(feedback)["reply"] == "Убрал"
+        restored = pipeline.calls[1]["journey"].days[1]
+        assert restored.state.excluded == {"osm:node/13"}
+        # The places of all three days, without the one no day refers to.
+        assert len(restored.state.registry) == 9
+        history = client.get("/api/journeys/j1").json()["history"]
+        assert [h["text"] for h in history] == [THREE_DAYS["request"], "без соборов"]
 
 
 def test_restart_keeps_todays_spend_in_the_budget(tmp_path, monkeypatch, pipeline):
@@ -491,7 +675,7 @@ def test_restart_keeps_todays_spend_in_the_budget(tmp_path, monkeypatch, pipelin
     monkeypatch.setattr(main, "limits", Limits(0, daily_budget_usd=0.01, max_concurrent=0))
     with TestClient(main.app) as client:
         _register(client)
-        _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+        _journey_data(client.post("/api/plan", json={"request": "Прогулка"}))
 
     monkeypatch.setattr(main, "limits", Limits(0, daily_budget_usd=0.01, max_concurrent=0))
     with TestClient(main.app) as client:
@@ -512,7 +696,7 @@ def test_catalog_is_public(client):
         ("/register", "auth.html"),
         ("/app/trips", "trips.html"),
         ("/app/new", "planner.html"),
-        ("/app/trips/trip1", "planner.html"),
+        ("/app/trips/j1", "planner.html"),
         ("/app/profile", "profile.html"),
         ("/app/onboarding", "profile.html"),
         ("/app/admin", "admin.html"),

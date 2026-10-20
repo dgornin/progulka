@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Прогулка — пеший маршрут из реальных мест под ваши интересы</title>
-  <meta name="description" content="Опишите день словами — LLM-агент найдёт реальные места в OpenStreetMap, Википедии и Wikivoyage, проверит часы работы и погоду и разложит прогулку по времени.">
+  <title>Прогулка — маршрут на каждый день поездки из настоящих мест</title>
+  <meta name="description" content="Едете в незнакомый город? Опишите, что вам интересно, — LLM-агент найдёт реальные места в OpenStreetMap, Википедии и Wikivoyage, проверит часы работы, погоду и время пешком и разложит всю поездку по дням на одной карте.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23c8412a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,15 +27,16 @@
         <span class="brand-name">Прогулка</span>
       </a>
       <nav class="site-nav" aria-label="Разделы страницы">
+        <a href="#travel">Для кого</a>
         <a href="#how">Как это работает</a>
         <a href="#why">Почему агент</a>
-        <a href="#you">Под вас</a>
+        <a href="#features">Возможности</a>
         <a href="#team">Команда</a>
       </nav>
       <div class="site-actions">
         <a class="btn btn-ghost" href="/login" data-guest>Войти</a>
-        <a class="btn btn-primary" href="/register" data-guest>Начать</a>
-        <a class="btn btn-primary" href="/app/trips" data-user hidden>Мои прогулки</a>
+        <a class="btn btn-primary" href="/register" data-guest><span class="label-long">Спланировать поездку</span><span class="label-short">Начать</span></a>
+        <a class="btn btn-primary" href="/app/trips" data-user hidden><span class="label-long">Мои путешествия</span><span class="label-short">Кабинет</span></a>
       </div>
     </div>
   </header>
@@ -44,15 +45,16 @@
     <section class="hero">
       <div class="container hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">LLM-агент для пеших прогулок</p>
-          <h1 class="display">Опишите день словами — получите <em>прогулку</em> из настоящих мест</h1>
-          <p class="lead">Агент сам ищет места в OpenStreetMap, Википедии и Wikivoyage, проверяет часы работы,
-            погоду и пешие переходы и раскладывает день по времени. Что-то не так — поправьте словами.</p>
+          <p class="eyebrow">LLM-агент для путешественников</p>
+          <h1 class="display">Едете в новый город? Маршрут на каждый день поездки&nbsp;— <em>из настоящих мест</em></h1>
+          <p class="lead">Опишите, что вам интересно, — текстом или голосом. Агент найдёт места в OpenStreetMap,
+            Википедии и Wikivoyage, проверит часы работы, погоду и время пешком и разложит всю поездку по дням
+            на одной карте. Что-то не так — поправьте словами.</p>
           <div class="hero-cta">
-            <a class="btn btn-primary btn-lg" href="/register" data-guest>Начать</a>
+            <a class="btn btn-primary btn-lg" href="/register" data-guest>Спланировать поездку</a>
             <a class="btn btn-lg" href="/login?demo=1" data-guest data-demo>Попробовать демо</a>
-            <a class="btn btn-primary btn-lg" href="/app/trips" data-user hidden>Мои прогулки</a>
-            <a class="btn btn-lg" href="/app/new" data-user hidden>Новая прогулка</a>
+            <a class="btn btn-primary btn-lg" href="/app/trips" data-user hidden>Мои путешествия</a>
+            <a class="btn btn-lg" href="/app/new" data-user hidden>Новое путешествие</a>
           </div>
           <p class="hero-note" data-guest>Уже есть аккаунт? <a href="/login">Войти</a></p>
           <p class="hero-note" data-user hidden>Вы вошли как <b id="user-name"></b></p>
@@ -62,29 +64,105 @@
         <figure class="hero-preview">
           <div class="preview-map">
             <img src="/static/img/route-example.jpg" width="1520" height="1280"
-                 alt="Карта центра Петербурга: маршрут из 12 остановок от Московского вокзала до Кузнечного рынка">
+                 alt="Карта центра Петербурга: маршрут первого дня, 12 остановок от Московского вокзала до Кузнечного рынка">
             <span class="preview-credit">© OpenFreeMap · © участники OpenStreetMap</span>
           </div>
+
+          <!-- a passport stamp: the trip the preview belongs to -->
+          <svg class="stamp" viewBox="0 0 160 160" aria-hidden="true">
+            <defs>
+              <path id="stamp-ring" d="M80 80 m-55 0 a55 55 0 1 1 110 0 a55 55 0 1 1 -110 0"/>
+              <filter id="stamp-ink">
+                <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="7"/>
+                <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -1.7 1.75"/>
+                <feComposite in="SourceGraphic" operator="in"/>
+              </filter>
+            </defs>
+            <g filter="url(#stamp-ink)">
+              <circle cx="80" cy="80" r="74" fill="none" stroke="currentColor" stroke-width="3"/>
+              <circle cx="80" cy="80" r="69" fill="none" stroke="currentColor" stroke-width="1"/>
+              <circle cx="80" cy="80" r="41" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <text class="stamp-ring"><textPath href="#stamp-ring" textLength="340" lengthAdjust="spacing">САНКТ-ПЕТЕРБУРГ ✦ 24–28.10.2026 ✦</textPath></text>
+              <text class="stamp-days" x="80" y="88" text-anchor="middle">5</text>
+              <text class="stamp-label" x="80" y="106" text-anchor="middle">ДНЕЙ</text>
+            </g>
+          </svg>
+
           <blockquote class="preview-request">
             <p class="preview-label">Запрос</p>
-            <p>«Суббота в Петербурге, с 11 до 18. Люблю конструктивизм и стрит-арт, хочу уличную еду,
-              музеи не надо. Старт от Московского вокзала»</p>
+            <p>«Еду в Петербург на 5 дней, с 24 октября. Гуляю с 11 до 18, люблю конструктивизм и стрит-арт,
+              хочу уличную еду, музеи не надо. Отель у Московского вокзала»</p>
           </blockquote>
-          <figcaption class="preview-plan">
-            <p class="eyebrow">Санкт-Петербург · сб · 11:00–18:00</p>
-            <p class="preview-title">Стрит-арт и конструктивизм от вокзала до Кузнечного</p>
-            <dl class="preview-stats">
-              <div><dt>остановок</dt><dd>12</dd></div>
-              <div><dt>км пешком</dt><dd>9,1</dd></div>
-              <div><dt>вся прогулка</dt><dd>5 ч 47 мин</dd></div>
-            </dl>
-            <ol class="preview-stops">
-              <li><span class="stop-n">1</span><span>Мурал «Туристы»</span><span class="src src-osm" title="OpenStreetMap">OSM</span></li>
-              <li><span class="stop-n">9</span><span>Блокадная подстанция, 1932</span><span class="src src-wikipedia" title="Википедия">W</span></li>
-              <li><span class="stop-n">10</span><span>Пышечная на Большой Конюшенной</span><span class="src src-wikivoyage" title="Wikivoyage">WV</span></li>
-            </ol>
-            <p class="preview-more">и ещё 9 — у каждой есть источник</p>
+
+          <figcaption class="ticket">
+            <div class="ticket-head">
+              <p class="ticket-route"><b>Санкт-Петербург</b><span>24–28 октября · 5 дней</span></p>
+              <ol class="day-strip" aria-label="Дни поездки">
+                <li class="is-current" style="--day: var(--day-1)"><span>сб</span><b>24</b></li>
+                <li style="--day: var(--day-2)"><span>вс</span><b>25</b></li>
+                <li style="--day: var(--day-3)"><span>пн</span><b>26</b></li>
+                <li style="--day: var(--day-4)"><span>вт</span><b>27</b></li>
+                <li style="--day: var(--day-5)"><span>ср</span><b>28</b></li>
+              </ol>
+            </div>
+            <div class="ticket-body">
+              <p class="eyebrow">День 1 · сб · 11:00–18:00</p>
+              <p class="preview-title">Стрит-арт и конструктивизм от вокзала до Кузнечного</p>
+              <dl class="preview-stats">
+                <div><dt>остановок</dt><dd>12</dd></div>
+                <div><dt>км пешком</dt><dd>9,1</dd></div>
+                <div><dt>весь день</dt><dd>5 ч 47 мин</dd></div>
+              </dl>
+              <ol class="preview-stops">
+                <li><span class="stop-n">1</span><span>Мурал «Туристы»</span><span class="src src-osm" title="OpenStreetMap">OSM</span></li>
+                <li><span class="stop-n">9</span><span>Блокадная подстанция, 1932</span><span class="src src-wikipedia" title="Википедия">W</span></li>
+                <li><span class="stop-n">10</span><span>Пышечная на Большой Конюшенной</span><span class="src src-wikivoyage" title="Wikivoyage">WV</span></li>
+              </ol>
+              <p class="preview-more">и ещё 9 — у каждой есть источник</p>
+            </div>
           </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section travel" id="travel" aria-labelledby="travel-title">
+      <div class="container travel-grid">
+        <div class="travel-copy">
+          <p class="eyebrow">Для путешественников</p>
+          <h2 class="title" id="travel-title">Местный знает, где гулять. Путешественник&nbsp;— нет.</h2>
+          <p class="lead">Дома вы и так знаете, куда пойти в выходной. В чужом городе каждый день поездки — это
+            час-два над картами, блогами и сайтами музеев: что рядом, что открыто, успеете ли дойти. Прогулка
+            берёт эту подготовку на себя.</p>
+          <ul class="checks">
+            <li><b>Места настоящие.</b> Каждое — из OpenStreetMap, Википедии или Wikivoyage, со ссылкой на источник.</li>
+            <li><b>Открыто, когда вы придёте.</b> Часы работы проверяются на конкретный день поездки.</li>
+            <li><b>Успеваете дойти.</b> Время пешком считается по настоящим улицам, а не по прямой.</li>
+            <li><b>Дни не повторяются.</b> У каждого дня свой район и тема, одно место не попадёт в два дня.</li>
+          </ul>
+        </div>
+
+        <figure class="ledger">
+          <figcaption class="ledger-title">Подготовка к поездке на 5 дней</figcaption>
+          <div class="ledger-row">
+            <p class="ledger-label">Самостоятельно<small>карты, блоги, часы работы, переходы</small></p>
+            <div class="ledger-bar is-manual" aria-hidden="true">
+              <span style="--day: var(--day-1)">1–2 ч</span>
+              <span style="--day: var(--day-2)">1–2 ч</span>
+              <span style="--day: var(--day-3)">1–2 ч</span>
+              <span style="--day: var(--day-4)">1–2 ч</span>
+              <span style="--day: var(--day-5)">1–2 ч</span>
+            </div>
+            <p class="ledger-total">5–10 ч</p>
+          </div>
+          <div class="ledger-row is-agent">
+            <p class="ledger-label">С Прогулкой<small>все дни ищутся параллельно</small></p>
+            <div class="ledger-bar is-agent" aria-hidden="true"><span></span></div>
+            <p class="ledger-total">минуты</p>
+          </div>
+          <p class="ledger-punch">5–10 часов — это целый день поездки. Лучше провести его на улицах города,
+            а не во вкладках браузера.</p>
+          <p class="ledger-note">Один день агент собирает в среднем за 32 секунды — это замер нашего eval
+            на 8 маршрутах.</p>
         </figure>
       </div>
     </section>
@@ -93,51 +171,52 @@
       <div class="container">
         <header class="section-head">
           <p class="eyebrow">Как это работает</p>
-          <h2 class="title" id="how-title">Пять остановок от идеи до маршрута</h2>
+          <h2 class="title" id="how-title">Пять остановок от идеи до поездки</h2>
         </header>
         <ol class="walk">
           <li class="walk-stop">
             <span class="walk-num" aria-hidden="true">1</span>
             <div class="walk-text">
-              <h3>Опишите прогулку</h3>
-              <p>Как другу: город, время, что любите и чего не надо. Или отметьте интересы и попросите
-                «больше природы, меньше музеев».</p>
-              <p class="walk-meta">текст → структурированный запрос</p>
+              <h3>Расскажите о поездке</h3>
+              <p>Город, даты в календаре, часы для прогулок и что вы любите — текстом или голосом.
+                Хватит и «5 дней в Питере с 24 октября».</p>
+              <p class="walk-meta">текст или голос → бриф поездки</p>
             </div>
           </li>
           <li class="walk-stop">
             <span class="walk-num" aria-hidden="true">2</span>
             <div class="walk-text">
-              <h3>Агент ищет реальные места</h3>
-              <p>Он сам решает, где искать каждый интерес: стрит-арт — в OpenStreetMap, конструктивизм — в Википедии,
-                еду — в Wikivoyage. Каждый его шаг видно на экране.</p>
-              <p class="walk-meta">ReAct-агент · 7 инструментов</p>
+              <h3>Агент делит город по дням</h3>
+              <p>У каждого дня своя тема и район, а у каждого сильного интереса — свой день.
+                Так дни не повторяют друг друга.</p>
+              <p class="walk-meta">Plan-and-Execute: план по дням</p>
             </div>
           </li>
           <li class="walk-stop">
             <span class="walk-num" aria-hidden="true">3</span>
             <div class="walk-text">
-              <h3>Код собирает расписание</h3>
-              <p>Оптимизатор укладывает остановки во время с учётом часов работы, дождя и пеших переходов,
-                а валидатор проверяет, что всё сходится.</p>
-              <p class="walk-meta">без LLM: арифметика времени</p>
+              <h3>Ищет реальные места</h3>
+              <p>Для каждого дня отдельно и параллельно: стрит-арт — в OpenStreetMap, конструктивизм —
+                в Википедии, еду — в Wikivoyage. Каждый шаг видно на экране.</p>
+              <p class="walk-meta">ReAct-агент · 7 инструментов</p>
             </div>
           </li>
           <li class="walk-stop">
             <span class="walk-num" aria-hidden="true">4</span>
             <div class="walk-text">
-              <h3>Правьте словами</h3>
-              <p>«После 15 обещают дождь», «убери второй собор», «добавь кофейню» — агент перестроит
-                только то, что нужно.</p>
-              <p class="walk-meta">правка → изменение плана</p>
+              <h3>Код собирает расписание</h3>
+              <p>Оптимизатор укладывает остановки во время с учётом часов работы, погоды и пеших переходов,
+                валидатор проверяет, что всё сходится.</p>
+              <p class="walk-meta">без LLM: арифметика времени</p>
             </div>
           </li>
           <li class="walk-stop">
             <span class="walk-num" aria-hidden="true">5</span>
             <div class="walk-text">
-              <h3>Он вас запоминает</h3>
-              <p>Анкета интересов и то, что агент понял из ваших правок, переходят из прогулки в прогулку.</p>
-              <p class="walk-meta">профиль + долгая память</p>
+              <h3>Правьте словами</h3>
+              <p>«Во вторник дождь», «убери второй собор», «добавь кофейню» — агент перестроит только
+                нужный день.</p>
+              <p class="walk-meta">правка → изменение плана дня</p>
             </div>
           </li>
         </ol>
@@ -152,7 +231,8 @@
           <p class="lead">Мы попросили ту же модель составить маршрут одним промптом и проверили оба варианта
             одним кодом: существуют ли места, открыты ли они в момент визита и успевает ли человек дойти.</p>
           <p class="muted">8 запросов в 7 городах, одна и та же модель. У одного промпта время между остановками
-            часто меньше, чем занимает дорога: такой маршрут нельзя пройти.</p>
+            часто меньше, чем занимает дорога: такой маршрут нельзя пройти — а в чужом городе это
+            выясняется уже на улице.</p>
         </div>
         <div class="score-wrap">
           <table class="score">
@@ -185,13 +265,73 @@
       </div>
     </section>
 
-    <section class="section" id="you" aria-labelledby="you-title">
+    <section class="section" id="features" aria-labelledby="features-title">
       <div class="container">
         <header class="section-head">
-          <p class="eyebrow">Под вас</p>
-          <h2 class="title" id="you-title">Маршрут, который знает, что вы любите</h2>
+          <p class="eyebrow">Возможности</p>
+          <h2 class="title" id="features-title">Поездка, которая знает, что вы любите</h2>
         </header>
         <div class="feature-grid">
+          <article class="feature feature-journey">
+            <div class="feature-text">
+              <h3>Вся поездка на одной карте</h3>
+              <p>До семи дней в одном городе: у каждого дня свой маршрут, свой цвет и своя тема. Путешествия
+                сохраняются в кабинете вместе с историей правок — к любому можно вернуться.</p>
+              <ol class="demo-days" aria-hidden="true">
+                <li style="--day: var(--day-1)"><b>1</b><span>сб, 24</span>Исторический центр и набережные</li>
+                <li style="--day: var(--day-2)"><b>2</b><span>вс, 25</span>Петроградская сторона и модерн</li>
+                <li style="--day: var(--day-3)"><b>3</b><span>пн, 26</span>Конструктивизм и стрит-арт</li>
+              </ol>
+            </div>
+            <svg class="demo-map" viewBox="0 0 400 260" aria-hidden="true">
+              <rect class="map-land" width="400" height="260" rx="14"/>
+              <ellipse class="map-park" cx="318" cy="214" rx="46" ry="26"/>
+              <path class="map-water" d="M-10 118 C 70 96, 120 70, 200 84 S 330 58, 410 28"/>
+              <path class="map-road" d="M0 190 L400 172 M0 40 L400 12 M118 0 L96 260 M268 0 L292 260 M0 250 L250 0"/>
+              <path class="map-lane" d="M0 150 L400 136 M0 222 L400 214 M188 0 L176 260 M340 0 L356 260 M60 0 L40 260"/>
+              <g style="--day: var(--day-3)">
+                <path class="map-route" d="M200 160 C 236 170, 266 200, 304 196 S 364 160, 356 120"/>
+                <circle class="map-stop" cx="250" cy="184" r="5"/><circle class="map-stop" cx="304" cy="196" r="5"/>
+                <circle class="map-stop" cx="356" cy="120" r="7"/>
+              </g>
+              <g style="--day: var(--day-2)">
+                <path class="map-route" d="M200 160 C 214 126, 214 96, 236 64 S 300 26, 336 44"/>
+                <circle class="map-stop" cx="214" cy="112" r="5"/><circle class="map-stop" cx="240" cy="60" r="5"/>
+                <circle class="map-stop" cx="336" cy="44" r="7"/>
+              </g>
+              <g style="--day: var(--day-1)">
+                <path class="map-route" d="M200 160 C 168 186, 128 214, 86 200 S 40 146, 78 126 S 150 136, 160 112"/>
+                <circle class="map-stop" cx="146" cy="196" r="5"/><circle class="map-stop" cx="62" cy="168" r="5"/>
+                <circle class="map-stop" cx="104" cy="128" r="5"/><circle class="map-stop" cx="160" cy="112" r="7"/>
+              </g>
+              <circle class="map-hotel" cx="200" cy="160" r="11"/>
+              <path class="map-hotel-mark" d="M195 162 L200 157 L205 162 V166 H195 Z"/>
+            </svg>
+          </article>
+
+          <article class="feature">
+            <h3>Скажите вслух</h3>
+            <p>Нажмите на микрофон и расскажите о поездке. Запись расшифровывает модель на сервере, поэтому голос
+              работает в любом браузере — и в Яндекс Браузере, и в Firefox.</p>
+            <div class="demo-voice" aria-hidden="true">
+              <span class="voice-mic">
+                <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+              </span>
+              <span class="voice-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="voice-time">0:07</span>
+            </div>
+            <p class="demo-quote" aria-hidden="true">«…четыре дня в Казани, люблю татарскую кухню и виды на реку, музеев поменьше»</p>
+          </article>
+
+          <article class="feature">
+            <h3>Правки словами</h3>
+            <p>Любой день можно поправить фразой. Агент перестроит только его, а остальные дни не тронет.</p>
+            <div class="demo-edit" aria-hidden="true">
+              <p class="demo-edit-day" style="--day: var(--day-4)"><b>4</b>вт, 27 октября</p>
+              <p class="demo-quote">«Во вторник обещают дождь — побольше под крышей»</p>
+            </div>
+          </article>
+
           <article class="feature">
             <h3>Анкета за минуту</h3>
             <p>Пятнадцать тем — от парков и набережных до баров и стрит-арта. Отметьте «интересно» или «очень»,
@@ -199,40 +339,19 @@
             <div class="demo-chips" aria-hidden="true">
               <span data-level="strong">Стрит-арт</span>
               <span data-level="plain">Архитектура</span>
-              <span data-level="strong">Кофейни и выпечка</span>
+              <span data-level="strong">Местная еда</span>
               <span>Природа и парки</span>
-              <span data-level="plain">Виды и панорамы</span>
               <span data-level="avoid">Музеи и галереи</span>
             </div>
           </article>
+
           <article class="feature">
-            <h3>Настройка каждой прогулки</h3>
-            <p>Сегодня хочется больше зелени и меньше музеев, спокойный темп и не дальше шести километров —
-              это пара нажатий перед стартом.</p>
-            <div class="demo-chips" aria-hidden="true">
-              <span data-level="more">больше: природа</span>
-              <span data-level="more">больше: набережные</span>
-              <span data-level="less">меньше: музеи</span>
-              <span>темп: спокойно</span>
-              <span>до 6 км</span>
-            </div>
-          </article>
-          <article class="feature">
-            <h3>Память между прогулками</h3>
-            <p>Агент замечает в ваших словах «не люблю очереди» или «хожу быстро» и помнит это дальше.
-              Что он запомнил, видно в профиле, и любой факт можно удалить.</p>
+            <h3>Память между поездками</h3>
+            <p>Агент замечает в ваших словах «не люблю очереди» или «хожу быстро» и помнит это в следующих
+              поездках. Что он запомнил, видно в профиле, и любой факт можно удалить.</p>
             <ul class="demo-memory" aria-hidden="true">
               <li>Не любит долгие очереди в музеи</li>
               <li>Ходит быстро, 25 минут пешком — нормально</li>
-            </ul>
-          </article>
-          <article class="feature">
-            <h3>Все прогулки в кабинете</h3>
-            <p>Маршруты сохраняются вместе с историей правок: можно вернуться к прошлому и продолжить
-              его менять или начать новый.</p>
-            <ul class="demo-trips" aria-hidden="true">
-              <li><b>Стрит-арт и конструктивизм</b><span>Петербург · 12 остановок</span></li>
-              <li><b>Казань на закате</b><span>Казань · 8 остановок</span></li>
             </ul>
           </article>
         </div>
@@ -242,14 +361,17 @@
     <section class="section cta" aria-labelledby="cta-title">
       <div class="container">
         <div class="cta-box">
-          <div>
-            <h2 class="title" id="cta-title">Попробуйте за минуту</h2>
-            <p class="lead">Демо-аккаунт с заполненным профилем — без регистрации и анкеты.</p>
+          <div class="cta-copy">
+            <p class="eyebrow">Следующая поездка</p>
+            <h2 class="title" id="cta-title">Часы подготовки&nbsp;— в&nbsp;пару минут</h2>
+            <p class="lead">Назовите город и даты — остальное агент соберёт сам.<span data-guest data-demo>
+              Демо-аккаунт с заполненным профилем — без регистрации и анкеты.</span></p>
           </div>
+          <span class="cta-perforation" aria-hidden="true"></span>
           <div class="cta-actions">
-            <a class="btn btn-primary btn-lg" href="/login?demo=1" data-guest data-demo>Войти в демо</a>
-            <a class="btn btn-lg" href="/register" data-guest>Создать аккаунт</a>
-            <a class="btn btn-primary btn-lg" href="/app/new" data-user hidden>Новая прогулка</a>
+            <a class="btn btn-primary btn-lg" href="/login?demo=1" data-guest data-demo>Попробовать демо</a>
+            <a class="btn btn-lg" href="/register" data-guest>Спланировать поездку</a>
+            <a class="btn btn-primary btn-lg" href="/app/new" data-user hidden>Новое путешествие</a>
           </div>
         </div>
       </div>

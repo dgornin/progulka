@@ -2,6 +2,9 @@
 
 A Place always comes from a source (OpenStreetMap, Wikipedia, Wikivoyage) and keeps
 its id and URL, so every stop in a plan can be traced back to where it was found.
+
+A trip (journey) is one to MAX_DAYS days in one city; each day is one walk with its
+own Plan, and DayOutline says what the day is about. A single walk is a one-day trip.
 """
 
 from collections.abc import Awaitable, Callable
@@ -26,6 +29,9 @@ InterestSource = Literal["request", "walk", "profile"]
 # scale) must be covered: finish_research is refused while one has no candidate, and
 # the validator warns when no stop serves one. RESEARCHER states the same number.
 MUST_HAVE_WEIGHT = 0.7
+# The longest trip planned at once. Each day is a research run of its own, so the
+# days bound the cost of one request; a week covers a city break with room to spare.
+MAX_DAYS = 7
 
 
 class Interest(BaseModel):
@@ -45,6 +51,7 @@ class TripBrief(BaseModel):
     country: str | None = None
     language: Literal["ru", "en"] = "ru"
     date: date
+    date_to: date | None = Field(None, description="Last day of a multi-day trip, inclusive")
     start_time: LocalTime
     end_time: LocalTime
     start_point: str | None = Field(None, description="Address or landmark, free text")
@@ -61,6 +68,20 @@ class GeoPoint(BaseModel):
     lat: float
     lon: float
     label: str | None = None
+
+
+class DayOutline(BaseModel):
+    """One day of a trip as the day planner (app/agent/outline.py) laid it out."""
+
+    index: int = Field(..., description="0-based")
+    date: date
+    theme: str = Field("", description="What the day is about; empty for a one-day trip")
+    focus: list[str] = Field(default_factory=list, description="Brief interest labels")
+    area: str | None = Field(None, description="District or landmark; None = the trip's start")
+    must_include: list[str] = Field(
+        default_factory=list, description="The brief's named places assigned to this day"
+    )
+    start: GeoPoint | None = Field(None, description="Where the day's walk begins")
 
 
 class Place(BaseModel):
@@ -148,7 +169,7 @@ EventType = Literal[
     "candidate",
     "warning",
     "memory",
-    "plan",
+    "journey",
     "error",
     "done",
 ]
