@@ -207,7 +207,7 @@ def tool_schemas() -> list[dict[str, Any]]:
     """OpenAI "tools" list; built per call so the category enum follows osm.CATEGORIES."""
     schemas = []
     for name, (args_model, _) in _TOOLS.items():
-        description, parameters = _parameters(args_model)
+        description, parameters = tool_parameters(args_model)
         if args_model is SearchOsm:
             parameters["properties"]["categories"]["items"]["enum"] = list(osm.CATEGORIES)
         schemas.append(
@@ -226,10 +226,7 @@ async def execute(state: ResearchState, name: str, arguments: str) -> ToolOutcom
     try:
         args = args_model.model_validate_json(arguments or "{}")
     except ValidationError as e:
-        problems = "; ".join(
-            f"{'.'.join(map(str, err['loc'])) or 'arguments'}: {err['msg']}" for err in e.errors()
-        )
-        return error_outcome(f"invalid arguments for {name}: {problems}")
+        return invalid_arguments(name, e)
     try:
         async with asyncio.timeout(TOOL_TIMEOUT_S):
             return await handler(state, args)
@@ -254,6 +251,14 @@ def error_outcome(message: str) -> ToolOutcome:
     return ToolOutcome(
         content=_json({"error": message}), summary=f"Ошибка: {message}", error=message
     )
+
+
+def invalid_arguments(name: str, e: ValidationError) -> ToolOutcome:
+    """What the model sent does not fit the tool's schema: every problem, by field."""
+    problems = "; ".join(
+        f"{'.'.join(map(str, err['loc'])) or 'arguments'}: {err['msg']}" for err in e.errors()
+    )
+    return error_outcome(f"invalid arguments for {name}: {problems}")
 
 
 def min_candidates(brief: TripBrief) -> int:
@@ -416,7 +421,7 @@ _TOOLS: dict[str, tuple[type[BaseModel], Handler]] = {
 }
 
 
-def _parameters(args_model: type[BaseModel]) -> tuple[str, dict[str, Any]]:
+def tool_parameters(args_model: type[BaseModel]) -> tuple[str, dict[str, Any]]:
     """Tool description and parameters schema, without pydantic's noise.
 
     Optional fields are advertised as plain optional types instead of

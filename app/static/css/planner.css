@@ -585,6 +585,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .tool-shortlist { background: var(--route-tint); color: var(--route-deep); }
 .tool-finish { background: var(--ink); color: #fff; }
 .tool-memory { background: var(--green-tint); color: var(--green); font-size: 0.9rem; }
+.tool-plan { background: #e2eff0; color: #1f5960; }
 
 .row.divider {
   grid-template-columns: minmax(0, 1fr);

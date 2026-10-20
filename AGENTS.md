@@ -1,17 +1,22 @@
 # AGENTS.md
 
 Progulka plans a walking route for each day of a 1–7 day trip in an unfamiliar city, from
-real places (OpenStreetMap, Wikipedia, Wikivoyage). Plan-and-Execute: an outline LLM step
-splits the trip into days, per-day ReAct agents research in parallel, deterministic code
-picks, orders and validates the stops. FastAPI + SQLite, vanilla JS UI; README.md has the why.
+real places (OpenStreetMap, Wikipedia, Wikivoyage). Orchestrator-workers with a synthesizer:
+an outline LLM step splits the trip into days, per-day ReAct agents research in parallel,
+a trip-planner ReAct agent gives their pooled finds to the days (2+ days; its tools run the
+real optimizer and validator), deterministic code orders and validates the stops.
+FastAPI + SQLite, vanilla JS UI; README.md has the why.
 
 ## Where things are
 - `app/main.py`, `auth.py`, `limits.py`: HTTP pages and API, accounts and sessions, public-deploy limits.
 - `app/db.py`, `store.py`: SQLite via SQLAlchemy; users, sessions, saved trips, memory.
 - `app/pipeline.py`, `personalization.py`, `profile.py`, `models.py`: the fixed pipeline,
   brief merging (code, not LLM), questionnaire, domain models.
-- `app/agent/`: every step where the LLM works (brief, outline, researcher + tools, writer,
-  replanner, memory, speech); all system prompts are in `prompts.py`.
+- `app/agent/`: every step where the LLM works (brief, outline, researcher + tools, trip
+  planner, writer, replanner, memory, speech); all system prompts are in `prompts.py`.
+  `planner.py` is the synthesizer of a trip of several days; whenever it does not finish,
+  `pipeline.py` assembles the days by code, which is also all that runs with
+  `TRIP_PLANNER_AGENT=0` (the eval's ablation: `eval/results/<model>-noplanner.*`).
 - `app/planning/`: deterministic optimizer, validator, opening hours, walking geometry and routing.
 - `app/sources/`: open-data clients; all HTTP goes through `sources/http.py` (User-Agent, cache, retries).
   `sources/wikidata.py` scores how well known a found place is (Wikipedia views, Wikidata sitelinks).

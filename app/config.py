@@ -36,6 +36,10 @@ class Settings:
     temperature: float
     reasoning: str  # "off" | "low" | "medium" | "high"
     agent_max_steps: int
+    # The trip planner agent allocates the found places to the days of a trip of several
+    # days (app/agent/planner.py); off, code assembles them: the eval's ablation, whose
+    # results go to eval/results/<model>-noplanner.*.
+    trip_planner_agent: bool
     user_agent: str
     cache_dir: Path
     overpass_urls: tuple[str, ...]  # tried in order; the last one that answered is tried first
@@ -68,6 +72,7 @@ def load_settings() -> Settings:
         temperature=float(_env("LLM_TEMPERATURE", "0.2")),
         reasoning=_env("LLM_REASONING", "off"),
         agent_max_steps=int(_env("AGENT_MAX_STEPS", "14")),
+        trip_planner_agent=_env("TRIP_PLANNER_AGENT", "1") != "0",
         user_agent=_env("HTTP_USER_AGENT", "progulka/0.1 (+https://github.com/dgornin/progulka)"),
         cache_dir=Path(_env("CACHE_DIR", str(REPO / ".cache"))),
         overpass_urls=tuple(

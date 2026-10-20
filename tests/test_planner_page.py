@@ -11,6 +11,7 @@ from pathlib import Path
 from starlette.routing import Route
 
 from app import main
+from app.agent.planner import planner_tool_schemas
 from app.agent.tools import tool_schemas
 from app.models import MAX_DAYS
 from app.pipeline import PlanRequest
@@ -18,6 +19,7 @@ from app.pipeline import PlanRequest
 STATIC = Path(__file__).parent.parent / "app" / "static"
 PLANNER_HTML = (STATIC / "planner.html").read_text()
 PLANNER_JS = (STATIC / "js" / "planner.js").read_text()
+PIPELINE = (Path(__file__).parent.parent / "app" / "pipeline.py").read_text()
 PLANNER_SCRIPTS = ("planner.js", "planner-map.js", "calendar.js", "time-range.js", "voice.js")
 MAPLIBRE = "https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl"
 # "/api/journeys/{journey_id}" -> a pattern any one path segment fills
@@ -44,8 +46,17 @@ def test_every_element_the_planner_script_looks_up_is_on_the_page():
 
 
 def test_every_agent_tool_has_its_icon_in_the_trace():
+    # The day agents' tools and the trip planner's: both stream their calls to the trace.
     icons = set(re.findall(r'\["(\w+)", \["', PLANNER_JS))
-    assert icons == {schema["function"]["name"] for schema in tool_schemas()}
+    schemas = [*tool_schemas(), *planner_tool_schemas()]
+    assert icons == {schema["function"]["name"] for schema in schemas}
+
+
+def test_every_stage_the_pipeline_reports_has_its_place_in_the_strip():
+    strip = set(re.findall(r'^  \["(\w+)", "', PLANNER_JS, flags=re.MULTILINE))
+    reported = set(re.findall(r'stage\(\s*\w+,\s*"(\w+)"', PIPELINE))
+    assert "synthesize" in reported
+    assert reported <= strip, f"missing in STAGES: {sorted(reported - strip)}"
 
 
 def test_maplibre_is_pinned_by_version_and_hash():

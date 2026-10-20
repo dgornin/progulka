@@ -8,21 +8,31 @@ from typing import Any
 
 import pytest
 
-from app.models import GeoPoint, Interest, Place, Stop, TripBrief
-from app.pipeline import Journey
+from app.llm import LLM
+from app.models import AgentEvent, GeoPoint, Interest, Place, Stop, TripBrief
+from app.pipeline import PLANNER_FALLBACK, Journey
+from app.sources import wikidata
 from app.sources.http import http
 from eval.run_eval import (
+    HARNESS_SEARCH,
     BaselineStop,
     Point,
     _locate,
     agent_points,
     avoid_hits,
     baseline_point,
+    harness_answer,
     interest_coverage,
     nominatim_kind,
+    planner_outcome,
     popularity_stats,
     repeats_across_days,
+    run_harness,
     score_journey,
+    stored_reading,
+    summary_sections,
+    summary_systems,
+    summary_table,
     write_results,
 )
 
@@ -227,6 +237,26 @@ def test_score_journey_sums_the_days_and_finds_repeats(
     assert (m.mean_pop, m.top_share) == (0.91, 0.17)  # one must-see among six stops
 
 
+def test_a_trip_row_says_how_the_trip_planner_ended() -> None:
+    def stage(**detail: Any) -> AgentEvent:
+        data = {"name": "synthesize", "status": "done", "label": "…", "detail": detail}
+        return AgentEvent(type="stage", data=data)
+
+    started = AgentEvent(type="stage", data={"name": "synthesize", "status": "start"})
+    finished = [started, stage(stop_reason="finished", steps=3, places=[5, 6])]
+    gave_up = [
+        started,
+        stage(stop_reason="time_budget", steps=7),
+        AgentEvent(type="warning", data={"message": PLANNER_FALLBACK}),
+    ]
+
+    assert planner_outcome(finished) == {"stop_reason": "finished", "steps": 3, "fallback": False}
+    # Code built the days: the row must not be scored as the planner's.
+    assert planner_outcome(gave_up) == {"stop_reason": "time_budget", "steps": 7, "fallback": True}
+    # A single walk, TRIP_PLANNER_AGENT=0 or a pool too small to share: no planner ran.
+    assert planner_outcome([AgentEvent(type="warning", data={"message": "День 2: …"})]) is None
+
+
 def test_a_run_of_trips_keeps_the_single_walks_the_deck_reads(tmp_path) -> None:
     # A row as runs before avoid hits, interests and popularity wrote it: the .md still
     # renders it.
@@ -258,3 +288,175 @@ def test_a_run_of_trips_keeps_the_single_walks_the_deck_reads(tmp_path) -> None:
     assert "| spb-constructivism | baseline | 9 | 9/9 | 0 | 5 | no | — | — | — | — | 21.6 |" in md
     assert "| kazan-3-days | 3/3 | 8, 9, 7 | 0 | 0 | 0 | 0 | 0 | 4/4 | 0.62 | 0.25 | 24.0 |" in md
     assert "| spb-5-days | error | LLMError: timeout |" in md
+
+
+def _answer(content: str, usage: dict, annotations: list | None = None) -> dict[str, Any]:
+    message = {"role": "assistant", "content": content, "annotations": annotations or []}
+    return {"choices": [{"message": message}], "usage": usage}
+
+
+def test_harness_answer_counts_the_searches_and_each_cited_page_once() -> None:
+    page = {"type": "url_citation", "url_citation": {"url": "https://sobor39.ru", "title": "Собор"}}
+    other = {"type": "url_citation", "url_citation": {"url": "https://culture.ru/1"}}
+    usage = {"prompt_tokens": 20478, "server_tool_use_details": {"web_search_requests": 5}}
+    raw = _answer("{}", usage, [page, page, other, {"type": "file"}])
+    assert harness_answer(raw) == ("{}", 5, 2)
+    # OpenRouter's docs name the field server_tool_use; an engine may return no citations.
+    raw = _answer("{}", {"server_tool_use": {"web_search_requests": 2}})
+    assert harness_answer(raw) == ("{}", 2, 0)
+    assert harness_answer({"choices": [{"message": {"content": None}}]}) == ("", 0, 0)
+
+
+async def test_run_harness_counts_the_chat_answer_and_checks_its_copy_as_the_baselines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[dict[str, Any]] = []
+    reasoning: list[dict[str, Any]] = []
+    prose = "Я проверил часы работы. 11:00–12:00 Эрмитаж, 12:00–13:00 Кунсткамера."
+    chat = _answer(
+        prose,
+        {"prompt_tokens": 20000, "completion_tokens": 700, "cost": 0.03}
+        | {"server_tool_use_details": {"web_search_requests": 3}},
+    )
+    copy = _answer(
+        '{"stops": [{"name": "Эрмитаж", "address": null, "arrive": "11:00", "depart": "12:00"},'
+        ' {"name": "Кунсткамера", "address": null, "arrive": "12:00", "depart": "13:00"}]}',
+        {"prompt_tokens": 500, "completion_tokens": 300, "cost": 0.001},
+    )
+
+    async def call(self: LLM, request: dict, extra_body: dict, timeout: float) -> dict:
+        sent.append(request)
+        reasoning.append(extra_body.get("reasoning"))
+        return [chat, copy][len(sent) - 1]
+
+    async def get_json(url: str, params: dict[str, Any], **options: Any) -> list[dict]:
+        if "featureType" in params:  # the city's bounding box: not needed here
+            return []
+        hit = {"lat": "59.93", "lon": "30.36", "category": "tourism", "type": "museum"}
+        return [hit | {"name": params["q"], "extratags": {"wikidata": "Q132783"}}]
+
+    async def scores(qids: Any, timeout_s: float | None = None) -> dict[str, float]:
+        return {"Q132783": 0.91}
+
+    monkeypatch.setattr(LLM, "_call_with_retries", call)
+    monkeypatch.setattr(http, "get_json", get_json)
+    monkeypatch.setattr(wikidata, "scores", scores)
+    brief = TripBrief(city="Санкт-Петербург", date=DAY, start_time=time(11), end_time=time(18))
+    query = {"request": "Петербург, 24 октября, с 11 до 18", "avoid": ["музеи"]}
+    base = LLM(client=None, model="anthropic/claude-haiku-5.5")
+
+    metrics, names, answer = await run_harness(
+        base, "anthropic/claude-opus-5.5", query, brief, GeoPoint(lat=59.93, lon=30.36), "low"
+    )
+
+    assert sent[0]["model"] == "anthropic/claude-opus-5.5"
+    assert sent[0]["tools"] == [HARNESS_SEARCH]
+    assert "Today is 2026-10-20" in sent[0]["messages"][0]["content"]
+    assert reasoning == [{"effort": "low"}, {"enabled": False}]  # the copy: the agent's setting
+    # The copy into JSON: the agent's model, without the search, given the prose alone.
+    assert sent[1]["model"] == "anthropic/claude-haiku-5.5" and "tools" not in sent[1]
+    assert sent[1]["messages"][1] == {"role": "user", "content": prose}
+    assert (names, answer) == (["Эрмитаж", "Кунсткамера"], prose)
+    assert (metrics.stops, metrics.found, metrics.avoid_hits, metrics.mean_pop) == (2, 2, 2, 0.91)
+    # Usage is the chat answer's alone: the copy is the eval's work.
+    assert (metrics.llm_calls, metrics.prompt_tokens, metrics.completion_tokens) == (1, 20000, 700)
+    assert (metrics.cost_usd, metrics.web_searches, metrics.cited_pages) == (0.03, 3, 0)
+    assert base.usage.calls == 0
+
+    sent.clear()
+    chat["choices"][0]["finish_reason"] = "length"  # the answer stops mid-route
+    with pytest.raises(ValueError, match="cut"):
+        await run_harness(base, "m", query, brief, GeoPoint(lat=59.93, lon=30.36), "default")
+    assert reasoning[-1] is None  # the model's own reasoning: no setting sent
+
+
+def test_stored_reading_is_the_rows_brief_and_start_when_the_run_recorded_them() -> None:
+    brief = TripBrief(
+        city="Казань", date=DAY, start_time=time(10), end_time=time(17), pace="relaxed"
+    )
+    start = GeoPoint(lat=55.8, lon=49.1, label="Кремль")
+    row = {"brief": brief.model_dump(mode="json"), "start": start.model_dump()}
+    assert stored_reading(row) == (brief, start)
+    assert stored_reading({"id": "kazan-history", "agent": {}}) is None  # an older run
+
+
+def _route(stops: int, impossible: int, km: float, **more: Any) -> dict[str, Any]:
+    m = {"stops": stops, "found": stops, "closed": 0, "impossible_legs": impossible}
+    m |= {"over_window": False, "walk_km": km, "avoid_hits": 0, "mean_pop": None}
+    m |= {"top_share": None, "llm_calls": 1, "cost_usd": 0.01, "seconds": 10.0}
+    return m | more
+
+
+def test_the_summary_compares_every_system_on_the_walks_all_of_them_answered() -> None:
+    walks = [
+        {"id": "a", "agent": _route(10, 0, 5.0), "baseline": _route(8, 3, 14.0, found=6)},
+        {"id": "b", "agent": _route(12, 0, 4.0), "baseline": _route(9, 0, 9.0)},
+    ]
+    tokens = {"prompt_tokens": 20000, "completion_tokens": 1000, "mean_pop": 0.6}
+    harness = [
+        {"id": "a", "model": "h", "harness": _route(6, 1, 7.0, **tokens)},
+        {"id": "b", "model": "h", "error": "LLMError: timeout"},
+    ]
+    systems = summary_systems("m", walks, harness)
+    assert [label for label, _ in systems] == [
+        "agent, `m`",
+        "one prompt, `m`",
+        "chat + web search, `h`",
+    ]
+    assert all(len(routes) == 1 for _, routes in systems)  # walk "b" failed for the harness
+    table = summary_table(systems)
+    # Tokens: — for the runs before they were recorded.
+    assert "| agent, `m` | 1 | 10/10 | 0 | 0 | 0/1 | 5.0 | — | — | 0.01 | 10.0 |" in table
+    assert "| one prompt, `m` | 1 | 6/8 | 0 | 3 | 1/1 | 14.0 | — | — |" in table
+    assert "| chat + web search, `h` | 1 | 6/6 | 0 | 1 | 1/1 | 7.0 | 0.6 | 21000 |" in table
+    assert summary_systems("m", [], []) == []
+
+
+def test_a_harness_model_with_fewer_walks_gets_a_summary_without_it() -> None:
+    walks = [{"id": q, "agent": _route(9, 0, 5.0), "baseline": _route(8, 2, 12.0)} for q in "ab"]
+    harness = [{"id": q, "model": "full", "harness": _route(7, 1, 9.0)} for q in "ab"]
+    harness.append({"id": "a", "model": "cut", "harness": _route(6, 0, 8.0)})
+    first, second = summary_sections("m", walks, harness)
+    assert "| chat + web search, `cut` | 1 |" in first and "| agent, `m` | 1 |" in first
+    assert second.startswith("Without `cut`, which answered fewer walks: over 2 walks.")
+    assert "| chat + web search, `full` | 2 |" in second and "`cut`" not in second.split("\n", 1)[1]
+    # Every model answered every walk, or none did: one table.
+    assert len(summary_sections("m", walks, harness[:2])) == 1
+    assert len(summary_sections("m", walks, harness[2:])) == 1
+
+
+def test_a_harness_run_keeps_the_rows_of_the_other_models_and_queries(tmp_path) -> None:
+    walks = [{"id": q, "model": "m", "agent": _route(9, 0, 5.0)} for q in ("a", "b")]
+    first = {"commit": "abc1234", "run_at": "2026-10-20T20:00+03:00"}
+    write_results(tmp_path, "m", "m", first, walks, [])
+    searched = {"web_searches": 3, "cited_pages": 0, "prompt_tokens": 9, "completion_tokens": 1}
+    haiku = [{"id": q, "model": "haiku", "harness": _route(7, 2, 9.0, **searched)} for q in "ab"]
+    write_results(tmp_path, "m", "m", first, [], [], haiku)
+
+    second = {"commit": "def5678+dirty", "run_at": "2026-10-20T21:00+03:00"}
+    opus = {"id": "a", "model": "opus", "reasoning": "low"}
+    opus["harness"] = _route(8, 0, 6.0, **searched)
+    rerun = {"id": "b", "model": "haiku", "error": "LLMError: no choices"}
+    write_results(tmp_path, "m", "m", second, [], [], [opus, rerun])
+
+    rows = json.loads((tmp_path / "m-harness.json").read_text())
+    assert [(r["model"], r["id"]) for r in rows] == [("haiku", "a"), ("opus", "a"), ("haiku", "b")]
+    assert json.loads((tmp_path / "m.json").read_text()) == walks  # the agent's are untouched
+    meta = json.loads((tmp_path / "m.meta.json").read_text())["m-harness.json"]
+    # Haiku's row a is still the first run's: the rerun of b must not claim it.
+    assert meta["haiku"] == [first | {"queries": ["a"]}, second | {"queries": ["b"]}]
+    assert meta["opus"] == [second | {"reasoning": "low", "queries": ["a"]}]
+    md = (tmp_path / "m.md").read_text()
+    assert (
+        "`haiku`: run 2026-10-20T20:00+03:00, commit `abc1234` (a); "
+        "run 2026-10-20T21:00+03:00, commit `def5678+dirty` (b); "
+        "`opus`: run 2026-10-20T21:00+03:00, commit `def5678+dirty`, reasoning low. "
+    ) in md
+    assert "| a | haiku | 7 | 7/7 | 0 | 2 | no | 0 | — | — | 9.0 | 3 | — | 10 | 0.01 | 10.0 |" in md
+    assert "| b | haiku | error | LLMError: no choices |" in md
+    # Walk b failed for haiku: the summary compares walk a only.
+    assert "| chat + web search, `opus` | 1 | 8/8 | 0 | 0 | 0/1 | 6.0 |" in md
+
+    write_results(tmp_path, "m", "m", second, [], [], haiku)  # every walk of haiku again
+    meta = json.loads((tmp_path / "m.meta.json").read_text())["m-harness.json"]
+    assert meta["haiku"] == [second | {"queries": ["a", "b"]}]

@@ -71,7 +71,7 @@ async def research(
     messages: list[dict[str, Any]] = [
         # The language rule sits in the system prompt too: deep into a long loop of English
         # tool results, a rule given once in the first user message stops being followed.
-        {"role": "system", "content": RESEARCHER + _language_rule(state.brief.language)},
+        {"role": "system", "content": RESEARCHER + language_rule(state.brief.language)},
         {"role": "user", "content": _task(state, goal, max_steps, traveller_facts)},
     ]
     schemas = tool_schemas()
@@ -138,7 +138,7 @@ def _count_call(calls_seen: Counter[tuple[str, str]], call: ToolCall) -> int:
     # arguments, and tools.py already bounds it to three attempts.
     if call.name == "finish_research":
         return 1
-    args = _parsed(call.arguments)
+    args = parsed_arguments(call.arguments)
     normalized = json.dumps(args, sort_keys=True) if isinstance(args, dict) else args.strip()
     key = (call.name, normalized)
     calls_seen[key] += 1
@@ -153,7 +153,7 @@ async def _run_tools(
         await emit(
             AgentEvent(
                 type="tool_call",
-                data={"id": call.id, "name": call.name, "args": _parsed(call.arguments)},
+                data={"id": call.id, "name": call.name, "args": parsed_arguments(call.arguments)},
             )
         )
 
@@ -172,7 +172,7 @@ async def _run_tools(
                 data={
                     "id": call.id,
                     "name": call.name,
-                    "args": _parsed(call.arguments),
+                    "args": parsed_arguments(call.arguments),
                     "summary": outcome.summary,
                     "count": outcome.count,
                     "error": outcome.error,
@@ -187,7 +187,7 @@ async def _run_tools(
 _LANGUAGES = {"ru": "Russian", "en": "English"}
 
 
-def _language_rule(language: str) -> str:
+def language_rule(language: str) -> str:
     name = _LANGUAGES[language]
     return f"\nThe traveller reads {name}: every note and reason you write must be in {name}."
 
@@ -242,7 +242,7 @@ def _task(
     return "\n\n".join(parts)
 
 
-def _parsed(arguments: str) -> dict[str, Any] | str:
+def parsed_arguments(arguments: str) -> dict[str, Any] | str:
     """Arguments as a dict when they are a JSON object, else the raw text."""
     try:
         value = json.loads(arguments)

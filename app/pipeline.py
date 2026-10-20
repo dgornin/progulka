@@ -1,49 +1,65 @@
-"""The macro-structure: Plan-and-Execute over the days of a trip, with a fixed
-pipeline and one agent loop inside every day.
+"""The macro-structure of a trip: an orchestrator, workers in parallel and a
+synthesizer (lecture 04), around a fixed pipeline whose code computes and checks.
 
     brief (LLM, structured output) -> city and start point (Nominatim)
     -> weather for every day (Open-Meteo)
-    -> outline: the day plan (LLM, structured output; only for two days or more)
-    -> research: one ReAct agent per day, the days in parallel
+    -> outline, the orchestrator: the day plan (LLM, structured output; two days or more)
+    -> research, the workers: one ReAct agent per day, the days in parallel
+    -> trip planner, the synthesizer: one ReAct agent gives what every worker found to the
+       days, checking each day with the code below (two days or more)
     -> per day, in order: optimize (code) -> walking route (OSRM) -> validate (code)
        -> one bounded repair round if the validator found errors
     -> texts (LLM, structured output), the days in parallel, and beside them
        long-term memory (LLM, structured output): it reads only the request
 
-A trip of several days is Plan-and-Execute (lecture 04): the outline is the plan (a
-theme, the focus interests, an area and the named places of every day,
-app/agent/outline.py), the research agents are the executors, one per day, and the
-replanner (app/agent/replanner.py) edits one day when the traveller gives feedback.
-A one-day trip, a single walk, makes no outline call and runs exactly as a walk
-always did. The forecast comes before the outline, so the planner can put the
-museums on the rainy day.
+A trip of several days is orchestrator-workers with a synthesizer, Plan-and-Execute over
+its days: the outline is the plan (a theme, the focus interests, an area and the named
+places of every day, app/agent/outline.py); the research agents execute it, one per day,
+each in a clean context of its own; the trip planner (app/agent/planner.py) integrates
+what they found; the replanner (app/agent/replanner.py) edits one day when the traveller
+gives feedback. A one-day trip, a single walk, makes no outline call and no planner call
+and runs exactly as a walk always did. The forecast comes before the outline, so the plan
+can put the museums on the rainy day, and the trip planner sees each day's rainy hours.
 
-Why the days are researched in parallel but optimized one by one. Research is the
-slow part (LLM turns, Overpass), and there the days do not depend on each other:
-they share one registry and one set of source queries (app/agent/tools.py), at most
-MAX_PARALLEL_DAYS at a time to stay polite to Overpass and the LLM provider. Choosing
-stops is where they do depend on each other: a place belongs to one day. So the
-optimizer runs day by day over the pool of all the shortlists minus what earlier days
-took, compared by real place, not by id (tools.same_place: the Wikipedia article of
-a cathedral an earlier day visits is out too). A day's own candidates keep their
-score and another day's get x OTHER_DAY_FACTOR: each day prefers what its own
-research found, yet can use a good place another day did not need. Such a place
-moves to this day's shortlist, so a later edit of the day keeps it. A place the
-traveller named waits for the day the outline gave it, whichever day's research
-found it.
+Why the days are researched in parallel but built one by one. Research is the slow part
+(LLM turns, Overpass), and there the days do not depend on each other: they share one
+registry and one set of source queries (app/agent/tools.py), at most MAX_PARALLEL_DAYS at
+a time to stay polite to Overpass and the LLM provider. Choosing stops is where they do
+depend on each other: a place belongs to one day, and two workers often find the same
+must-see. Which day gets it is the synthesizer's decision, an agent's because it depends
+on what the workers found: the trip planner sees their shortlists pooled, one entry per
+real place, and assigns them to the days. Its check tool runs the code below on a day's
+places without committing them, so the agent corrects its plan against the code's
+verdict, not its own opinion. Then each day is built from its assignment alone, with the
+other days' places taken, compared by real place, not by id (tools.same_place: the
+Wikipedia article of a cathedral another day visits is out too), so a repeat stays
+impossible whatever the agent did.
 
-Only the research step is an agent, because only there the next step depends on
-what was found. Everything that can be computed (geocoding, time arithmetic, route
-order, opening hours) is code, and the validator is the external critic the repair
-round listens to.
+Code assembles the days without the planner (TRIP_PLANNER_AGENT=0, the eval's ablation)
+and whenever it does not finish or its plan does not build: the trip is planned all the
+same, with a warning; at once, without the planner and without a warning, when the pool
+has too few places to give every day one (planner.TripPlan.fillable). The optimizer then
+runs day by day over the pool of all the shortlists minus what earlier days took. A day's
+own candidates keep their score and another day's get x OTHER_DAY_FACTOR: each day
+prefers what its own research found, yet can use a good place another day did not need.
+Either way a place a day takes from another day's shortlist moves to its own (replacing
+the day's own record of it, if any), so a later edit of the day keeps it, and a place the
+traveller named waits for the day the outline gave it, whichever day's research found it.
+
+Agents work where the next step depends on what was found: the research (which source,
+which query) and the allocation across days (which find belongs to which day).
+Everything that can be computed (geocoding, time arithmetic, route order, opening hours)
+is code, and the validator is the external critic both the repair round and the trip
+planner listen to.
 
 Feedback on a day re-enters at research (when new places are needed) or at
 optimize, with the stops of the other days taken and the places removed from them
 kept out, and every route, first or rebuilt, goes through the same validation and
 repair round. A stop of another day is out for good; a place removed from another
 day is out until the traveller asks for it on this one: «Убрать» on one day and
-«добавь X» on another is how a place moves between days. A failed feedback run is
-not saved: the caller stores the trip only after success.
+«добавь X» on another is how a place moves between days. Feedback does not call the trip
+planner: the other days keep their stops, so there is nothing to share out again. A
+failed feedback run is not saved: the caller stores the trip only after success.
 
 Personal context: the planner panel, the request, the profile and later the feedback
 are merged into the brief by code (app/personalization.py); long-term memory and the
@@ -54,9 +70,10 @@ keeps nothing between runs: the caller persists the journey, so it survives a re
 """
 
 import asyncio
+import logging
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from itertools import pairwise
 from typing import Any
@@ -66,6 +83,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.agent.brief import parse_brief
 from app.agent.memory import extract_memory
 from app.agent.outline import draft_days, locate_areas, one_day, trip_dates
+from app.agent.planner import TripDay, TripPlan, plan_days, pool_trip
 from app.agent.prompts import DAY_GOAL, REPAIR_GOAL, REPLACE_GOAL
 from app.agent.replanner import PlanEdit, interpret_feedback
 from app.agent.researcher import ResearchResult, research
@@ -103,11 +121,16 @@ from app.profile import Profile, WalkPreferences
 from app.sources import geocode, weather
 from app.sources.http import SourceError
 
+log = logging.getLogger(__name__)
+
 # Budgets of the research runs: steps and wall-clock seconds. A repair or a feedback
 # run continues a finished plan, so it gets less than the first research.
 RESEARCH_BUDGET_S = 150.0
 FEEDBACK_STEPS, FEEDBACK_BUDGET_S = 8, 90.0
 REPAIR_STEPS, REPAIR_BUDGET_S = 6, 60.0
+# The trip planner (app/agent/planner.py) works on a small context in a few turns; past
+# its budget the days are assembled by code.
+PLANNER_STEPS, PLANNER_BUDGET_S = 12, 90.0
 # The city is required, the forecast is optional: neither may stall the run for the
 # minutes the shared HTTP client spends on retries.
 GEOCODE_TIMEOUT_S = 30
@@ -134,6 +157,7 @@ class PipelineError(RuntimeError):
 EMPTY_REQUEST = "Опишите путешествие или укажите город"
 LLM_TIMEOUT = "LLM-провайдер не ответил вовремя, попробуйте ещё раз"
 TOO_MANY_DAYS = f"Не больше {MAX_DAYS} дней в одной поездке: сократите даты"
+PLANNER_FALLBACK = "Планировщик не договорился — собираю дни кодом"
 
 
 class PlanRequest(BaseModel):
@@ -297,22 +321,7 @@ async def plan_journey(
         # Every day failed or found nothing: the provider's error says more, if any.
         raise failures[0] if failures else _nothing_found(results[0])
 
-    plans = []
-    scheduled: set[str] = set()
-    for i, day in enumerate(days):
-        day.state.taken = scheduled | _named_elsewhere(days, i)
-        borrowed = _borrowed(days, i, day.state.taken)
-        try:
-            plan = await _build_checked(day, llm, _for_day(emit, i), facts, borrowed)
-        except PipelineError as e:
-            if len(days) == 1:
-                raise
-            raise PipelineError(f"День {i + 1}: {e}") from e
-        for stop in plan.stops:
-            if stop.place.id in borrowed and stop.place.id not in day.state.shortlist:
-                day.state.shortlist[stop.place.id] = borrowed[stop.place.id]
-        scheduled |= {stop.place.id for stop in plan.stops}
-        plans.append(plan)
+    plans = await _assemble_trip(days, outline, brief, llm, emit, facts)
     # The memory call needs only the request, not the texts: it runs beside the writers.
     _, learned = await asyncio.gather(
         _each_day(len(days), lambda i: _write(days[i], llm, _for_day(emit, i), plans[i], facts)),
@@ -338,7 +347,8 @@ async def apply_day_feedback(
     profile: Profile | None = None,
     memory: list[str] | None = None,
 ) -> tuple[Journey, str | None]:
-    """Feedback on one day; the other days stay as they are and keep their stops.
+    """Feedback on one day; the other days stay as they are and keep their stops, so the
+    trip planner is not called: the day is rebuilt from its own shortlist, as by code.
 
     The caller checks `day_index` (main.feedback). `profile` and `memory` as in
     plan_journey; the brief was personalised when the trip was planned, here they only
@@ -537,6 +547,168 @@ def _borrowed(days: list[DayRun], index: int, taken: set[str]) -> dict[str, Cand
     return pool
 
 
+def _selected(
+    day: DayRun, selection: Mapping[str, Candidate]
+) -> tuple[dict[str, Candidate], set[str]]:
+    """The trip planner's places for the day as _build's arguments: the day's own records
+    of them from its shortlist, the other days' at their full score (the planner, not a
+    discount, decided they belong here), and nothing else."""
+    borrowed = {pid: c for pid, c in selection.items() if pid not in day.state.shortlist}
+    return borrowed, set(selection)
+
+
+async def _assemble_trip(
+    days: list[DayRun],
+    outline: list[DayOutline],
+    brief: TripBrief,
+    llm: LLM,
+    emit: Emit,
+    facts: Sequence[str],
+) -> list[Plan]:
+    """Every day's route. On a trip of several days the trip planner allocates the found
+    places to the days first, unless TRIP_PLANNER_AGENT=0 (the eval's ablation). Whatever
+    goes wrong there, code assembles the days as it does without the planner, and the trip
+    is planned all the same."""
+    if len(days) == 1 or not settings.trip_planner_agent:
+        return await _assemble(days, llm, emit, facts)
+    try:
+        trip: TripPlan | None = pool_trip(brief, _trip_days(days, outline), facts)
+    except Exception:
+        log.exception("trip planner: pooling failed")  # as in _synthesize: not the trip
+        trip = None
+    if trip is not None and not trip.fillable():
+        # Every finish would be refused until the planner's budget ran out, and code
+        # would then fail on the same empty day: it may as well do so now.
+        log.warning("trip planner skipped: %d pooled places for %d days", len(trip.pool), len(days))
+        return await _assemble(days, llm, emit, facts)
+    selections = await _synthesize(days, trip, llm, emit) if trip is not None else None
+    if selections is not None:
+        kept = [dict(day.state.shortlist) for day in days]
+        try:
+            return await _assemble(days, llm, emit, facts, selections)
+        except PipelineError as e:
+            # A day of the agreed plan came out empty even after its repair round (the
+            # planner's finish was accepted with errors): undo what the attempt moved.
+            log.warning("trip planner: its plan did not build (%s), assembling by code", e)
+            for day, shortlist in zip(days, kept, strict=True):
+                day.state.shortlist = shortlist
+    await emit(_warning(PLANNER_FALLBACK))
+    return await _assemble(days, llm, emit, facts)
+
+
+def _trip_days(days: list[DayRun], outline: list[DayOutline]) -> list[TripDay]:
+    """The days as the trip planner sees them."""
+    return [
+        TripDay(
+            outline=plan,
+            brief=day.state.brief,
+            start=day.state.start,
+            weather=day.weather,
+            shortlist=day.state.available(),
+        )
+        for plan, day in zip(outline, days, strict=True)
+    ]
+
+
+async def _synthesize(
+    days: list[DayRun], trip: TripPlan, llm: LLM, emit: Emit
+) -> list[dict[str, Candidate]] | None:
+    """The trip planner's places for every day, or None when it did not finish."""
+    await stage(
+        emit, "synthesize", "start", "Сборка поездки: агент-планировщик распределяет места по дням"
+    )
+
+    async def check(index: int, selection: dict[str, Candidate], others: set[str]) -> Plan:
+        # On a copy of the day's state: a check commits nothing, not even what is taken.
+        day = days[index]
+        taken = others | _named_elsewhere(days, index)
+        trial = DayRun(id=day.id, state=replace(day.state, taken=taken), weather=day.weather)
+        return await _build(trial, _silent, *_selected(day, selection))
+
+    try:
+        result = await plan_days(
+            llm,
+            trip,
+            check,
+            emit,
+            max_steps=PLANNER_STEPS,
+            time_budget_s=PLANNER_BUDGET_S,
+        )
+    except Exception:
+        # A bug in the planner or a check must not cost the traveller the trip.
+        log.exception("trip planner failed")
+        result = None
+    if result is None or result.selections is None:
+        reason = result.stop_reason if result else "error"
+        await stage(
+            emit,
+            "synthesize",
+            "done",
+            f"Планировщик остановился: {_PLANNER_STOPS.get(reason, reason)}",
+            {"stop_reason": reason, "steps": result.steps if result else 0},
+        )
+        return None
+    await stage(
+        emit,
+        "synthesize",
+        "done",
+        "Места распределены по дням" + (f": {result.summary}" if result.summary else ""),
+        {
+            "stop_reason": result.stop_reason,
+            "steps": result.steps,
+            "places": [len(selection) for selection in result.selections],
+        },
+    )
+    return result.selections
+
+
+async def _assemble(
+    days: list[DayRun],
+    llm: LLM,
+    emit: Emit,
+    facts: Sequence[str],
+    selections: list[dict[str, Candidate]] | None = None,
+) -> list[Plan]:
+    """Build, check and repair the days' routes one after another (see the module
+    docstring). Without `selections` a day takes from its own shortlist and, discounted,
+    from what the other days found and did not take; with them, only the places the trip
+    planner gave it, and the other days' are taken before those days are built, so its
+    repair round cannot take them either."""
+    plans = []
+    scheduled: set[str] = set()
+    for i, day in enumerate(days):
+        day.state.taken = scheduled | _named_elsewhere(days, i)
+        if selections is None:
+            borrowed, allowed = _borrowed(days, i, day.state.taken), None
+        else:
+            day.state.taken |= {
+                pid for j, chosen in enumerate(selections) if j != i for pid in chosen
+            }
+            borrowed, allowed = _selected(day, selections[i])
+        try:
+            plan = await _build_checked(day, llm, _for_day(emit, i), facts, borrowed, allowed)
+        except PipelineError as e:
+            if len(days) == 1:
+                raise
+            raise PipelineError(f"День {i + 1}: {e}") from e
+        for stop in plan.stops:
+            if stop.place.id in borrowed and stop.place.id not in day.state.shortlist:
+                # It replaces the day's own record of the place, if any (the trip planner
+                # gives the fullest one, planner._merged): a later rebuild of the day keeps
+                # the record it was planned with, opening hours and all.
+                for pid, own in list(day.state.shortlist.items()):
+                    if same_place(own.place, stop.place):
+                        del day.state.shortlist[pid]
+                day.state.shortlist[stop.place.id] = borrowed[stop.place.id]
+        scheduled |= {stop.place.id for stop in plan.stops}
+        plans.append(plan)
+    return plans
+
+
+async def _silent(event: AgentEvent) -> None:
+    """The trip planner's checks build days that are not committed: nothing to show."""
+
+
 async def _each_day[T](count: int, work: Callable[[int], Awaitable[T]]) -> list[T]:
     """work(i) for every day at once, at most MAX_PARALLEL_DAYS at a time. The first
     failure cancels the other days and is raised as is, not as an ExceptionGroup: the
@@ -681,18 +853,21 @@ async def _build_checked(
     emit: Emit,
     facts: Sequence[str],
     borrowed: Mapping[str, Candidate] | None = None,
+    allowed: set[str] | None = None,
 ) -> Plan:
     """Build and validate the route; on errors, one bounded repair round.
 
     The validator's findings become the research agent's goal. A route with no stops
-    is never returned as a result.
+    is never returned as a result. `allowed`: see _build; what the repair round finds is
+    allowed too, since it answers the validator's findings on this day.
     """
-    plan = await _build(day, emit, borrowed)
+    plan = await _build(day, emit, borrowed, allowed)
     errors = [v for v in plan.violations if v.severity == "error"]
     if errors:
         await stage(emit, "repair", "start", "Валидатор нашёл проблемы — агент исправляет")
         # The messages stay in the traveller's language: they are data for the agent.
         goal = REPAIR_GOAL.format(problems="\n".join(f"- {v.message}" for v in errors))
+        before = set(day.state.shortlist)
         try:
             result = await research(
                 llm,
@@ -708,7 +883,9 @@ async def _build_checked(
             # days' places: it keeps the route as built, the validator's errors shown.
             await stage(emit, "repair", "done", "Исправить не удалось: LLM-провайдер не ответил")
         else:
-            plan = await _build(day, emit, borrowed)
+            if allowed is not None:
+                allowed = allowed | (set(day.state.shortlist) - before)
+            plan = await _build(day, emit, borrowed, allowed)
             await stage(emit, "repair", "done", "Исправление завершено", {"steps": result.steps})
     if not plan.stops:
         raise PipelineError(
@@ -758,8 +935,14 @@ def _costliest(
     return order[worst]
 
 
-async def _build(day: DayRun, emit: Emit, borrowed: Mapping[str, Candidate] | None = None) -> Plan:
-    """`borrowed`: other days' candidates this day may use (see _borrowed)."""
+async def _build(
+    day: DayRun,
+    emit: Emit,
+    borrowed: Mapping[str, Candidate] | None = None,
+    allowed: Collection[str] | None = None,
+) -> Plan:
+    """`borrowed`: other days' candidates this day may use (see _borrowed). `allowed`:
+    when given, the only places the route may use (the trip planner's for this day)."""
     state = day.state
     pool = {**(borrowed or {}), **state.shortlist}
     # Out: what the traveller rejected here or on another day, what other days took,
@@ -773,7 +956,8 @@ async def _build(day: DayRun, emit: Emit, borrowed: Mapping[str, Candidate] | No
     # optimizer sorts by id itself: the order matters only there).
     for pid, c in sorted(pool.items(), key=lambda item: item[0] not in state.shortlist):
         if (
-            pid in out
+            (allowed is not None and pid not in allowed)
+            or pid in out
             or any(matches_avoid(a, c.place.kind, c.place.name) for a in state.brief.avoid)
             or any(same_place(c.place, p) for p in [*blocked, *(k.place for k in candidates)])
         ):
@@ -940,4 +1124,10 @@ _STOP_REASONS = {
     "repeated_action": "агент начал повторяться",
     "no_tool_calls": "агент перестал вызывать инструменты",
     "llm_error": "LLM-провайдер не ответил, беру найденное",
+}
+# The trip planner keeps nothing of a run it did not finish.
+_PLANNER_STOPS = {
+    **_STOP_REASONS,
+    "llm_error": "LLM-провайдер не ответил",
+    "error": "внутренняя ошибка",
 }
