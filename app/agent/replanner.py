@@ -11,7 +11,7 @@ and a note in the reply says so: the model wrote the reply before these checks.
 from pydantic import BaseModel, Field
 
 from app.agent.prompts import REPLANNER
-from app.llm import LLM
+from app.llm import LLM, SHORT_REQUEST_TIMEOUT_S
 from app.models import Interest, LocalTime, Plan
 
 NOTES = {
@@ -53,7 +53,7 @@ async def interpret_feedback(llm: LLM, plan: Plan, feedback: str) -> PlanEdit:
         {"role": "system", "content": REPLANNER},
         {"role": "user", "content": _context(plan) + f"\n\nFeedback: {feedback}"},
     ]
-    edit = await llm.structured(messages, PlanEdit)
+    edit = await llm.structured(messages, PlanEdit, timeout=SHORT_REQUEST_TIMEOUT_S)
     notes = NOTES[plan.brief.language]
 
     in_plan = {stop.place.id for stop in plan.stops}

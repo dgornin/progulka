@@ -93,20 +93,6 @@ export function dayLabel(isoDate) {
   return noon(isoDate).toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" });
 }
 
-/**
- * The dates of a journey: "24–28 октября", "30 октября – 2 ноября", one day as
- * "сб, 24 октября"; the year appears only when it is not the current one.
- */
-export function dateRange(from, to) {
-  const [start, end] = [noon(from), noon(to ?? from)];
-  const thisYear = new Date().getFullYear();
-  const year = start.getFullYear() !== thisYear || end.getFullYear() !== thisYear ? "numeric" : undefined;
-  if (start.getTime() === end.getTime()) {
-    return start.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long", year });
-  }
-  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year }).formatRange(start, end);
-}
-
 const relative = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
 
 /** An ISO timestamp as "5 минут назад", "вчера" or, past a week, "12 октября". */

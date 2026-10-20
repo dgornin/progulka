@@ -14,7 +14,7 @@ from app import pipeline
 from app.agent import outline
 from app.agent.outline import draft_days, locate_areas
 from app.agent.tools import ResearchState
-from app.llm import ChatTurn
+from app.llm import ChatTurn, LLMError
 from app.models import Candidate, DayOutline, GeoPoint, HourWeather, Interest, Place, TripBrief
 from app.planning.geo import haversine_m
 from app.sources import geocode, osm, weather
@@ -51,10 +51,13 @@ SEARCH = {"categories": ["museum", "cafe"], "radius_m": 1000}
 
 class TripLLM:
     """A scripted LLM for days that run in parallel: the agent's turns are scripted per
-    day (read from the date in the research task), structured replies per schema, and
-    the writer gets texts for exactly the stops it was sent."""
+    day (read from the date in the research task), an exception among them is raised,
+    structured replies per schema, and the writer gets texts for exactly the stops it
+    was sent."""
 
-    def __init__(self, turns: dict[date, list[ChatTurn]], structured: dict[str, list[Any]]):
+    def __init__(
+        self, turns: dict[date, list[ChatTurn | Exception]], structured: dict[str, list[Any]]
+    ):
         self.turns = turns
         self.structured_replies = structured
         self.days: list[date] = []  # the day of every agent turn, in call order
@@ -65,7 +68,10 @@ class TripLLM:
         self.days.append(day)
         self.seen.append(("chat", json.loads(json.dumps(messages))))
         await asyncio.sleep(0)  # a real call yields to the other days
-        return self.turns[day].pop(0)
+        reply = self.turns[day].pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
     async def structured(self, messages, schema, **_):
         self.seen.append((schema.__name__, messages))
@@ -289,6 +295,79 @@ async def test_feedback_on_one_day_leaves_the_other_days_places_alone(sources):
     assert {e.data.get("day") for e in events} == {1}
 
 
+async def test_a_place_removed_from_one_day_is_not_planned_on_another(sources, make_journey):
+    journey = make_journey(days=2)
+    first, second = journey.days
+    rejected = first.state.registry["osm:node/13"]  # the traveller removed it from day 2
+    assert rejected.id in second.state.excluded
+    spare = Place(
+        id="osm:node/50", name="Запасное", lat=59.935, lon=30.36, kind="park", source="osm"
+    )
+    first.state.registry[spare.id] = spare
+    # The first day's research found both too.
+    for place in (rejected, spare):
+        first.state.shortlist[place.id] = Candidate(
+            place=place, score=0.9, reason="рядом", visit_minutes=20
+        )
+    llm = TripLLM(
+        turns={},
+        structured={"PlanEdit": [{"exclude_place_ids": ["osm:node/1"], "reply": "Убираю."}]},
+    )
+
+    journey, _ = await pipeline.apply_day_feedback(
+        journey, 0, pipeline.FeedbackRequest(feedback="без первого места"), llm, Recorder()
+    )
+
+    assert rejected.id in journey.days[0].state.taken
+    assert {s.place.id for s in journey.days[0].plan.stops} == {"osm:node/2", spare.id}
+
+
+async def test_a_day_the_provider_fails_is_built_from_the_other_days_places(sources):
+    failure = LLMError("rate limited", 429)
+    llm = TripLLM(
+        turns={
+            DAY: _day_turns([1, 2, 3, 4, 5], "история"),  # one more than the day takes
+            RAINY: [failure, failure],  # its research, then its repair round
+            DAY + timedelta(days=2): _day_turns([21, 22, 23, 24], "стрит-арт"),
+        },
+        structured={"BriefDraft": [BRIEF_REPLY], "OutlineDraft": [OUTLINE_REPLY]},
+    )
+    events = Recorder()
+
+    journey = await pipeline.plan_journey(
+        pipeline.PlanRequest(request="Казань, три дня"), llm, events, DAY
+    )
+
+    stops = [[s.place.id for s in day.plan.stops] for day in journey.days]
+    assert all(stops) and len(sum(stops, [])) == len(set(sum(stops, [])))
+    # The second day got the place the first day had no room for; its repair round
+    # failed too, and it keeps the route as built.
+    assert len(stops[1]) == 1 and stops[1][0] not in stops[0]
+    assert "too_few_stops" in {v.code for v in journey.days[1].plan.violations}
+    warnings = [e.data for e in events if e.type == "warning"]
+    assert warnings == [
+        {"message": "День 2: LLM-провайдер не ответил, соберу день из мест других дней", "day": 1}
+    ]
+    done = [e.data for e in events if e.type == "stage" and e.data["status"] == "done"]
+    assert sorted(e["day"] for e in done if e["name"] == "research") == [0, 1, 2]
+    assert [e["label"] for e in done if e["name"] == "repair"] == [
+        "Исправить не удалось: LLM-провайдер не ответил"
+    ]
+
+
+async def test_a_trip_whose_every_day_fails_reports_the_providers_error(sources):
+    failure = LLMError("rate limited", 429)
+    llm = TripLLM(
+        turns={DAY + timedelta(days=i): [failure] for i in range(3)},
+        structured={"BriefDraft": [BRIEF_REPLY], "OutlineDraft": [OUTLINE_REPLY]},
+    )
+
+    with pytest.raises(LLMError, match="rate limited"):
+        await pipeline.plan_journey(
+            pipeline.PlanRequest(request="Казань, три дня"), llm, Recorder(), DAY
+        )
+
+
 async def test_a_single_walk_makes_no_outline_call(sources):
     llm = TripLLM(
         turns={DAY: _day_turns([1, 2, 3, 4], "история")},
@@ -420,7 +499,7 @@ async def test_an_area_off_the_map_or_far_away_starts_from_the_trips_start(sourc
 
 
 def test_other_days_candidates_are_discounted_and_named_places_wait_for_their_day():
-    def run(named: str, *candidates: tuple[int, bool]) -> pipeline.TripRun:
+    def run(named: str, *candidates: tuple[int, bool]) -> pipeline.DayRun:
         shortlist = {
             f"osm:node/{n}": Candidate(
                 place=P[f"osm:node/{n}"], score=0.5, reason="ок", visit_minutes=30, required=req
@@ -429,7 +508,7 @@ def test_other_days_candidates_are_discounted_and_named_places_wait_for_their_da
         }
         brief = _brief(must_include=[named])
         state = ResearchState(brief=brief, start=CENTER, weather_summary="", shortlist=shortlist)
-        return pipeline.TripRun(id="d", state=state, weather=[])
+        return pipeline.DayRun(id="d", state=state, weather=[])
 
     # «Место 2» is named for the first day, «Место 3» for the second; the second day's
     # research found both.
@@ -448,6 +527,46 @@ def test_other_days_candidates_are_discounted_and_named_places_wait_for_their_da
         "osm:node/5": (0.3, False),
     }
     assert days[1].state.shortlist["osm:node/5"].score == 0.5  # the other day keeps its own
+
+
+async def test_another_sources_record_of_a_planned_place_is_not_planned_again(sources):
+    cathedral = Place(
+        id="osm:way/1",
+        name="Исаакиевский собор",
+        lat=CENTER.lat + 0.005,
+        lon=CENTER.lon,
+        kind="church",
+        source="osm",
+        tags={"wikidata": "Q1"},
+    )
+    # Wikipedia's record of the same cathedral, six metres away.
+    article = cathedral.model_copy(
+        update={"id": "wikipedia:ru:2", "source": "wikipedia", "lon": CENTER.lon + 0.0001}
+    )
+    others = [P["osm:node/2"], P["osm:node/3"]]
+
+    def shortlist(*places: Place) -> dict[str, Candidate]:
+        return {p.id: Candidate(place=p, score=0.8, reason="ок", visit_minutes=30) for p in places}
+
+    state = ResearchState(
+        brief=_brief(date_to=None, must_include=[]),
+        start=CENTER,
+        weather_summary="",
+        registry={p.id: p for p in [cathedral, article, *others]},
+        shortlist=shortlist(cathedral, *others),
+    )
+    day = pipeline.DayRun(id="d", state=state, weather=[])
+
+    # Another day's research found the article: the day keeps its own record only.
+    plan = await pipeline._build(day, Recorder(), borrowed=shortlist(article))
+    assert [s.place.id for s in plan.stops].count(cathedral.id) == 1
+    assert article.id not in {s.place.id for s in plan.stops}
+
+    # Another day planned the cathedral: its article on this day's shortlist stays out.
+    state.shortlist = shortlist(article, *others)
+    state.taken = {cathedral.id}
+    plan = await pipeline._build(day, Recorder())
+    assert {s.place.id for s in plan.stops} == {p.id for p in others}
 
 
 async def test_a_named_place_found_by_an_earlier_day_stays_with_its_own_day(sources):

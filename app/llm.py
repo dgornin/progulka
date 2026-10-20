@@ -10,9 +10,11 @@ Three jobs, all of them things a framework would hide from you:
   request timeouts plus the backoff.
 - `structured`: ask for JSON matching a pydantic model, validate it, and on a
   validation error send the errors back and ask again (bounded retries).
-- a replay cache: every response is stored on disk under a hash of the request,
-  and with LLM_REPLAY=1 an identical request is answered from disk. That makes a
-  rehearsed demo reproducible even when the free tier is rate-limited.
+- a replay cache: with LLM_REPLAY=1 every response is stored on disk under a hash of
+  the request, and an identical request is answered from disk. That makes a demo
+  rehearsed with it on reproducible even when the provider is rate-limited. With it
+  off nothing is stored: a public server keeps no visitor's words it would never
+  replay. Transcription is never cached: a recording is never byte-identical twice.
 """
 
 import asyncio
@@ -34,6 +36,9 @@ log = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 REQUEST_TIMEOUT_S = 60
+# Per attempt, for the small structured answers (brief, outline, feedback) whose whole
+# step the pipeline cuts at 60 s: a stalled first attempt still leaves room for a second.
+SHORT_REQUEST_TIMEOUT_S = 25
 RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 4
 
@@ -128,7 +133,11 @@ class LLM:
         max_tokens: int = 2500,
         response_format: dict[str, Any] | None = None,
         model: str | None = None,
+        cache: bool = True,
+        timeout: float | None = None,
     ) -> ChatTurn:
+        """`cache=False`: never replayed nor recorded (see the module docstring).
+        `timeout`: per attempt, instead of REQUEST_TIMEOUT_S; not part of the cache key."""
         request: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,
@@ -144,16 +153,18 @@ class LLM:
         effort = {"enabled": False} if self.reasoning == "off" else {"effort": self.reasoning}
         extra_body = {"reasoning": effort, "usage": {"include": True}}
 
-        raw = self._cache_get(request) if self.replay else None
+        replay = self.replay and cache
+        raw = self._cache_get(request) if replay else None
         if raw is not None:
             self.usage.cached_calls += 1
         else:
-            if self.replay:
+            if replay:
                 # A rehearsed run that misses here differs from the rehearsal (another
                 # date, prompt or source answer) and from now on goes to the provider.
                 log.warning("LLM replay miss: calling the provider")
-            raw = await self._call_with_retries(request, extra_body)
-            self._cache_put(request, raw)
+            raw = await self._call_with_retries(request, extra_body, timeout)
+            if replay:
+                self._cache_put(request, raw)
             self._count(raw)
         return _parse_turn(raw)
 
@@ -163,6 +174,7 @@ class LLM:
         schema: type[T],
         max_retries: int = 2,
         max_tokens: int = 2500,
+        timeout: float | None = None,
     ) -> T:
         """Return a validated `schema` instance; feed validation errors back on failure."""
         json_schema = _require_all(schema.model_json_schema())
@@ -181,7 +193,11 @@ class LLM:
         last_error = ""
         for _ in range(max_retries + 1):
             turn = await self.chat(
-                history, temperature=0, max_tokens=max_tokens, response_format=response_format
+                history,
+                temperature=0,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                timeout=timeout,
             )
             text = turn.content or ""
             try:
@@ -200,12 +216,15 @@ class LLM:
         raise LLMError(f"model did not return valid {schema.__name__} JSON: {last_error}")
 
     async def _call_with_retries(
-        self, request: dict[str, Any], extra_body: dict[str, Any]
+        self, request: dict[str, Any], extra_body: dict[str, Any], timeout: float | None
     ) -> dict[str, Any]:
+        options = {"timeout": timeout} if timeout else {}
         delay = 2.0
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
-                resp = await self.client.chat.completions.create(**request, extra_body=extra_body)
+                resp = await self.client.chat.completions.create(
+                    **request, extra_body=extra_body, **options
+                )
                 raw = resp.model_dump()
                 # OpenRouter may answer 200 with {"error": {...}} and no choices when the
                 # upstream provider is busy; treat it like a 502 and retry.

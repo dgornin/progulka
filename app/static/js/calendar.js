@@ -1,12 +1,14 @@
 /*
  * A date-range calendar for the journey composer, and the Russian date wording the
- * planner shows around it («24–28 октября · 5 дней», «сб 24 окт»).
+ * planner shows around it and the cabinet shows on its cards («24–28 октября · 5 дней»,
+ * «сб 24 окт»).
  *
  * Why our own: <input type="date"> picks one day, and two of them neither show the
  * range nor stop a trip at seven days; the browsers' pickers also differ (Yandex
  * Browser, Firefox, Safari) and cannot be styled. Here one month is a grid: the first
- * click sets the first day (a one-day trip is already a valid choice), the second the
- * last; days past the seven-day limit and days in the past cannot be picked.
+ * click sets the first day, and the trip's length then comes from the request («5 дней»);
+ * the second click sets the last, so clicking one day twice means a one-day trip. Days
+ * past the seven-day limit and days in the past cannot be picked.
  *
  * Keyboard: the grid has one tab stop (roving tabindex, the WAI-ARIA grid pattern);
  * arrows move by a day or a week, Home/End to the week's ends, PageUp/PageDown by a
@@ -55,14 +57,15 @@ export function shortDay(iso) {
   return `${WEEKDAYS_SHORT[weekday]} ${date} ${MONTHS_SHORT[month]}`;
 }
 
-/** "24–28 октября", "30 октября – 2 ноября", "24 октября"; a year only when the range crosses one. */
+/** "24–28 октября", "30 октября – 2 ноября", "24 октября"; the year only when it is not the current one. */
 export function rangeText(from, to = from) {
   const a = parts(dayOf(from));
   const b = parts(dayOf(to));
-  if (from === to) return `${a.date} ${MONTHS_OF[a.month]}`;
   if (a.year !== b.year) return `${a.date} ${MONTHS_OF[a.month]} ${a.year} – ${b.date} ${MONTHS_OF[b.month]} ${b.year}`;
-  if (a.month !== b.month) return `${a.date} ${MONTHS_OF[a.month]} – ${b.date} ${MONTHS_OF[b.month]}`;
-  return `${a.date}–${b.date} ${MONTHS_OF[b.month]}`;
+  const year = a.year === new Date().getFullYear() ? "" : ` ${a.year}`;
+  if (from === to) return `${a.date} ${MONTHS_OF[a.month]}${year}`;
+  if (a.month !== b.month) return `${a.date} ${MONTHS_OF[a.month]} – ${b.date} ${MONTHS_OF[b.month]}${year}`;
+  return `${a.date}–${b.date} ${MONTHS_OF[b.month]}${year}`;
 }
 
 /** "24–28 октября · 5 дней". */
@@ -77,8 +80,9 @@ let instances = 0;
 
 export class RangeCalendar {
   /**
-   * `onChange({from, to} | null)` fires on every pick: after the first click the range
-   * is one day long, after the second it is complete.
+   * `onChange({from, to} | null)` fires on every pick: after the first click only the
+   * first day is set (`to` equals it, and `complete` is false), after the second the
+   * range is complete.
    */
   constructor({ maxDays = 7, onChange = () => {} } = {}) {
     this.maxDays = maxDays;
@@ -123,9 +127,15 @@ export class RangeCalendar {
     return this.from === null ? null : { from: isoOf(this.from), to: isoOf(this.to) };
   }
 
-  /** Show a range (a saved one, say) without firing onChange; null clears. */
+  /** The last day is picked too, not only the first. */
+  get complete() {
+    return this.from !== null && !this.picking;
+  }
+
+  /** Show a range (a saved one, say) without firing onChange; null clears, and a range
+   * without `to` has only its first day picked. */
   set(range) {
-    this.picking = false;
+    this.picking = Boolean(range && !range.to);
     this.hover = null;
     if (!range) {
       this.from = this.to = null;
@@ -253,8 +263,9 @@ export class RangeCalendar {
 
   summaryText() {
     if (this.from === null) return "Даты не выбраны";
-    const label = rangeLabel(isoOf(this.from), isoOf(this.to));
-    return this.picking ? `${label} — теперь последний день` : label;
+    // only the first day yet: not «1 день», the request may still set the length
+    if (this.picking) return `с ${rangeText(isoOf(this.from))} — теперь последний день`;
+    return rangeLabel(isoOf(this.from), isoOf(this.to));
   }
 
   onKey(e) {
@@ -274,6 +285,7 @@ export class RangeCalendar {
       this.picking = false;
       this.hover = null;
       this.paint();
+      this.onChange(this.value); // the range is complete now: one day
       return;
     } else return; // Enter and Space reach the focused button as a click
     e.preventDefault();

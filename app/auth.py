@@ -102,8 +102,8 @@ async def seed_account(
     Created when missing (already onboarded, so it skips the questionnaire); when the
     password in .env no longer matches, the stored one is reset to it. That is how an
     operator rotates the demo and admin passwords without a password-change form.
-    A given profile is restored at every start: the demo account is shared, and any
-    visitor can change it.
+    A given profile is restored and the memory emptied at every start: the demo account
+    is shared, and its visitors' runs teach it facts about strangers.
     """
     found = await store.credentials(email)
     if found is None:
@@ -122,6 +122,7 @@ async def seed_account(
         await store.update_user(user.id, is_admin=is_admin, password_hash=new_hash)
     if profile is not None:
         await store.put_profile(user.id, profile)
+        await store.forget_all(user.id)
 
 
 def get_store(request: Request) -> Store:

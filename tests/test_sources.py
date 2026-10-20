@@ -159,6 +159,34 @@ async def test_search_places_falls_back_to_the_mirror_and_then_prefers_it(api):
     assert places
 
 
+async def test_a_query_after_a_mirror_failed_starts_at_the_next_one(api, monkeypatch):
+    urls = settings.overpass_urls
+    sent: list[str] = []
+    release = asyncio.Event()
+
+    async def respond(url, data, **options):
+        sent.append(url)
+        if url == urls[0]:
+            raise SourceError("overpass-api.de: HTTP 504")
+        await release.wait()  # the second mirror is slow
+        return fixture("overpass_pushkinskaya")
+
+    async def sent_count(n: int) -> None:
+        while len(sent) < n:
+            await asyncio.sleep(0)
+
+    monkeypatch.setattr(http, "post_form_json", respond)
+    point = GeoPoint(lat=59.9330, lon=30.3570)
+    first = asyncio.create_task(osm.search_places(point, 500, ["museum"]))
+    await sent_count(2)
+    second = asyncio.create_task(osm.search_places(point, 600, ["museum"]))
+    await sent_count(3)
+    release.set()
+
+    assert (await first) and (await second)
+    assert sent == [urls[0], urls[1], urls[1]]
+
+
 async def test_search_places_skips_an_instance_that_timed_out_inside_the_query(api):
     api.responses = [
         {"remark": "runtime error: Query timed out", "elements": []},
@@ -377,3 +405,24 @@ async def test_only_rate_limited_hosts_get_one_request_at_a_time(monkeypatch):
     )
 
     assert most == {"limited.test": 1, "free.test": 3}
+
+
+async def test_a_mirror_that_failed_is_skipped_by_the_requests_queued_behind_it(monkeypatch):
+    hits: Counter[str] = Counter()
+
+    async def server(request: httpx.Request) -> httpx.Response:
+        hits[request.url.host] += 1
+        await asyncio.sleep(0.01)
+        return httpx.Response(504)
+
+    client = HttpClient(cache_dir=None, user_agent="test")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(server))
+    monkeypatch.setitem(MIN_INTERVAL, "mirror.test", 0)
+
+    failures = await asyncio.gather(
+        *(client.post_form_json("https://mirror.test/", {"n": n}, attempts=1) for n in range(3)),
+        return_exceptions=True,
+    )
+
+    assert hits == {"mirror.test": 1}
+    assert all(isinstance(failure, SourceError) for failure in failures)

@@ -1590,7 +1590,8 @@ function updateBuildLabel() {
     return;
   }
   const range = calendar.value;
-  const oneDay = range !== null && range.from === range.to;
+  // one click sets only the first day: the request may still make the trip longer
+  const oneDay = calendar.complete && range.from === range.to;
   // From a saved journey the composer starts another one; the current one stays saved.
   if (state.journeyId) ui.build.textContent = oneDay ? "Построить новый маршрут" : "Построить новое путешествие";
   else ui.build.textContent = oneDay ? "Построить маршрут" : "Построить путешествие";
@@ -1604,7 +1605,11 @@ function readComposer() {
     if (value) fields[name] = value;
   }
   const range = calendar.value;
-  if (range) Object.assign(fields, { date_from: range.from, date_to: range.to });
+  if (range) {
+    fields.date_from = range.from;
+    // one click sets only the first day: the trip's length then comes from the request
+    if (calendar.complete) fields.date_to = range.to;
+  }
   if (windowTouched) {
     const { start, end } = timeRange.value;
     Object.assign(fields, { start_time: wireTime(start), end_time: wireTime(end) });
@@ -1615,7 +1620,7 @@ function readComposer() {
 function fillComposer({ request, fields, preferences: prefs }) {
   ui.request.value = request;
   for (const name of TEXT_FIELDS) ui.composer.elements[name].value = fields[name] ?? "";
-  calendar.set(fields.date_from ? { from: fields.date_from, to: fields.date_to ?? fields.date_from } : null);
+  calendar.set(fields.date_from ? { from: fields.date_from, to: fields.date_to } : null);
   const [start, end] = [fields.start_time ?? DEFAULT_WINDOW[0], fields.end_time ?? DEFAULT_WINDOW[1]];
   timeRange.set(minutesOf(start), minutesOf(end));
   windowTouched = Boolean(fields.start_time);
@@ -1630,7 +1635,7 @@ function settingsChips({ fields, preferences: prefs }) {
   const chip = (cls, text) => h("span", { class: `chip ${cls}` }, text);
   return [
     fields.city ? chip("is-strong", fields.city) : null,
-    fields.date_from ? chip("", rangeLabel(fields.date_from, fields.date_to ?? fields.date_from)) : null,
+    fields.date_from ? chip("", fields.date_to ? rangeLabel(fields.date_from, fields.date_to) : `с ${rangeText(fields.date_from)}`) : null,
     fields.start_time ? chip("", `${clock(fields.start_time)}–${clock(fields.end_time)}`) : null,
     fields.start_point ? chip("", `старт: ${fields.start_point}`) : null,
     prefs.more.map((key) => chip("is-interest", `+ ${interestLabel(key)}`)),
@@ -1693,7 +1698,7 @@ function renderProfileNote(profile) {
   if (profile.home_city) {
     ui.requestHint.textContent =
       `Как другу: что любите, что не надо, с кем едете. Город, даты и время — ниже. Можно ничего ` +
-      `не писать — тогда агент соберёт маршрут по городу из профиля (${profile.home_city}) и вашим интересам.`;
+      `не писать — тогда агент возьмёт город по умолчанию из профиля (${profile.home_city}) и ваши интересы.`;
   }
 }
 
@@ -1736,8 +1741,8 @@ ui.composer.addEventListener("submit", (e) => {
   }
   showRequestError("");
   state.submitted = body;
-  // An empty field or unpicked dates are not sent: the agent takes them from the text,
-  // then the profile. The daily window is always sent (see readComposer).
+  // Empty fields, unpicked dates and an untouched time slider are not sent: the agent
+  // takes them from the text, then the profile (see readComposer).
   run("/api/plan", { request: body.request, ...body.fields, preferences: body.preferences }, "plan", body.request || NO_REQUEST_TEXT);
 });
 ui.request.addEventListener("keydown", submitOnCmdEnter(ui.composer));

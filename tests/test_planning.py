@@ -332,12 +332,17 @@ ROUTE_POINTS = [
 
 
 def _fake_osrm(monkeypatch, response):
+    calls = []
+
     async def get_json(url, params=None):
+        calls.append(url)
         if isinstance(response, Exception):
             raise response
         return response
 
     monkeypatch.setattr(http, "get_json", get_json)
+    monkeypatch.setattr(routing, "_down_until", 0.0)  # restored after the test
+    return calls
 
 
 async def test_walking_route_reads_osrm(monkeypatch):
@@ -362,7 +367,17 @@ async def test_slow_routing_service_gives_none(monkeypatch):
 
     monkeypatch.setattr(http, "get_json", hanging)
     monkeypatch.setattr(routing, "ROUTE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(routing, "_down_until", 0.0)
     assert await routing.walking_route(ROUTE_POINTS) is None
+
+
+async def test_a_failed_routing_service_is_not_asked_again_for_a_while(monkeypatch):
+    calls = _fake_osrm(monkeypatch, SourceError("down"))
+
+    assert await routing.walking_route(ROUTE_POINTS) is None
+    assert await routing.walking_route(ROUTE_POINTS) is None  # the next day: straight lines
+
+    assert len(calls) == 1
 
 
 async def test_long_polyline_is_thinned(monkeypatch):

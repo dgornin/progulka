@@ -8,6 +8,20 @@ from app.db import connect, create_schema
 from app.profile import Profile, WalkPreferences
 from app.store import HistoryEntry, Store
 
+# The trips table once a migration has finished: a trip row is a day of a journey.
+DAY_COLUMNS = {
+    "id",
+    "user_id",
+    "journey_id",
+    "day_index",
+    "date",
+    "stops",
+    "walk_km",
+    "state",
+    "weather",
+    "plan",
+}
+
 
 async def _user(store, email="anna@example.com"):
     return await store.create_user(email, "hash", "Анна")
@@ -89,7 +103,7 @@ async def test_journey_summary_detail_and_history(store, make_journey):
     detail = await store.get_journey(user.id, "j1")
     view = detail.journey
     assert [len(day.plan.stops) for day in view.days] == [2, 1]
-    assert [(day.index, day.theme, day.trip_id) for day in view.days] == [
+    assert [(day.index, day.theme, day.day_id) for day in view.days] == [
         (0, "Тема дня 1", "j1-0"),
         (1, "Тема дня 2", "j1-1"),
     ]
@@ -178,11 +192,11 @@ async def test_admin_totals_and_cost_of_today(store, make_journey):
     totals = await store.totals()
 
     assert (totals["users"], totals["journeys"], totals["journeys_today"]) == (2, 2, 1)
-    assert (totals["trips"], totals["trips_today"]) == (5, 3)
+    assert (totals["days"], totals["days_today"]) == (5, 3)
     assert totals["llm_cost_today"] == pytest.approx(0.03)
     assert totals["llm_cost_total"] == pytest.approx(0.53)
     users = {u.email: u for u in await store.admin_users()}
-    assert (users["anna@example.com"].journeys, users["anna@example.com"].trips) == (2, 5)
+    assert (users["anna@example.com"].journeys, users["anna@example.com"].days) == (2, 5)
     assert users["anna@example.com"].cost_usd == pytest.approx(0.53)
     assert users["boris@example.com"].journeys == 0 and users["boris@example.com"].cost_usd == 0
 
@@ -226,18 +240,7 @@ async def test_a_trip_saved_before_journeys_becomes_a_one_day_journey(
     with sqlite3.connect(path) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(trips)")}
         source = db.execute("SELECT source_trip_id FROM memory_facts").fetchone()
-    assert columns == {
-        "id",
-        "user_id",
-        "journey_id",
-        "day_index",
-        "date",
-        "stops",
-        "walk_km",
-        "state",
-        "weather",
-        "plan",
-    }
+    assert columns == DAY_COLUMNS
     assert source == ("trip1",)
 
 
@@ -267,5 +270,28 @@ async def test_a_migration_cut_short_finishes_at_the_next_start(tmp_path, make_l
     detail = await Store(engine).get_journey(1, "trip1")
     await engine.dispose()
 
-    assert [day.trip_id for day in detail.journey.days] == ["trip1"]
+    assert [day.day_id for day in detail.journey.days] == ["trip1"]
     assert detail.request == "Суббота в Петербурге"
+
+
+async def test_a_migration_cut_short_between_its_drops_finishes_at_the_next_start(
+    tmp_path, make_legacy_database
+):
+    path = tmp_path / "old.db"
+    make_legacy_database(path)
+    # With no trip to copy every ALTER commits at once: a start stopped after two drops.
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM memory_facts")
+        db.execute("DELETE FROM trips")
+        db.execute("ALTER TABLE trips ADD COLUMN journey_id VARCHAR(32)")
+        db.execute("ALTER TABLE trips ADD COLUMN day_index INTEGER NOT NULL DEFAULT 0")
+        db.execute("DROP INDEX ix_trips_updated_at")
+        db.execute("ALTER TABLE trips DROP COLUMN title")
+        db.execute("ALTER TABLE trips DROP COLUMN city")
+    engine = connect(f"sqlite+aiosqlite:///{path}")
+    await create_schema(engine)
+    await engine.dispose()
+
+    with sqlite3.connect(path) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(trips)")}
+    assert columns == DAY_COLUMNS

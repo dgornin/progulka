@@ -8,10 +8,13 @@ not used: walking time comes from the traveller's pace (geo.walk_minutes).
 The public server is best-effort, so on any failure we return None and the caller
 keeps the estimate and draws straight lines. For the same reason the wait is capped:
 the shared HTTP client retries for up to two minutes, and a nicer line on the map is
-not worth that.
+not worth that. After a failure the server is not asked for DOWN_S: the days of a
+trip and their repair rounds are routed one after another, and each would wait out
+the cap again.
 """
 
 import asyncio
+import time
 from dataclasses import dataclass
 from math import ceil
 
@@ -20,7 +23,9 @@ from app.sources.http import SourceError, http
 
 OSRM_FOOT = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/"
 MAX_POLYLINE_POINTS = 2000  # plenty for a city map; keeps the plan JSON small
-ROUTE_TIMEOUT_S = 20.0
+ROUTE_TIMEOUT_S = 10.0
+DOWN_S = 300.0
+_down_until = 0.0  # time.monotonic() until which the server counts as down
 
 
 @dataclass
@@ -31,7 +36,8 @@ class RouteResult:
 
 async def walking_route(points: list[GeoPoint]) -> RouteResult | None:
     """Route through the points in order; None if there is no route or the service failed."""
-    if len(points) < 2:
+    global _down_until
+    if len(points) < 2 or time.monotonic() < _down_until:
         return None
     coords = ";".join(f"{p.lon:.6f},{p.lat:.6f}" for p in points)
     try:
@@ -41,6 +47,7 @@ async def walking_route(points: list[GeoPoint]) -> RouteResult | None:
                 params={"overview": "full", "geometries": "geojson", "steps": "false"},
             )
     except (SourceError, TimeoutError):
+        _down_until = time.monotonic() + DOWN_S
         return None
     if data.get("code") != "Ok" or not data.get("routes"):
         return None

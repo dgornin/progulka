@@ -284,7 +284,7 @@ def test_facts_about_the_traveller() -> None:
     assert traveller_facts(profile, ["не любит толпы"]) == ["не любит толпы", *notes]
     assert traveller_facts(None, []) == []
     assert profile_facts(profile) == [
-        "Домашний город: Казань",
+        "Город по умолчанию для поездок: Казань",
         "Интересы: Природа и парки (очень), История",
         "Не предлагать: Бары и тусовки",
         "Темп прогулок: спокойно",

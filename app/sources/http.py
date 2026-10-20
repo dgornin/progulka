@@ -7,7 +7,9 @@
 - on-disk cache keyed by method + URL + params + body, so the same city is not
   fetched twice and a rehearsed demo does not depend on the network;
 - retries with backoff on 429/5xx and timeouts; callers with mirrors (Overpass)
-  ask for one short attempt instead and fail over themselves.
+  ask for one short attempt instead and fail over themselves. A mirror that fails
+  so is skipped for MIRROR_DOWN_S: the requests queued behind it on its host's lock
+  would otherwise each wait out the timeout before trying the next mirror.
 """
 
 import asyncio
@@ -32,6 +34,7 @@ MIN_INTERVAL = {
 }
 CACHE_TTL_S = 7 * 24 * 3600
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+MIRROR_DOWN_S = 60.0
 
 
 class SourceError(RuntimeError):
@@ -48,6 +51,7 @@ class HttpClient:
         )
         self._locks: dict[str, asyncio.Lock] = {}
         self._last: dict[str, float] = {}
+        self._down_until: dict[str, float] = {}  # mirror host -> when to try it again
 
     async def get_json(
         self,
@@ -106,6 +110,10 @@ class HttpClient:
         delay = 2.0
         for attempt in range(1, attempts + 1):
             async with gate:
+                # Checked once the gate is ours: the request may have queued behind the
+                # one that found the mirror down.
+                if self._down_until.get(host, 0) > time.monotonic():
+                    raise SourceError(f"{host}: failed a moment ago, skipped")
                 wait = MIN_INTERVAL.get(host, 0) - (time.monotonic() - self._last.get(host, 0))
                 if wait > 0:
                     await asyncio.sleep(wait)
@@ -122,6 +130,9 @@ class HttpClient:
                     error = f"{host}: {type(e).__name__}"
                 finally:
                     self._last[host] = time.monotonic()
+                mirror = attempts == 1  # the caller fails over to another mirror
+                if mirror and (resp is None or resp.status_code in RETRY_STATUSES):
+                    self._down_until[host] = time.monotonic() + MIRROR_DOWN_S
             if resp is not None and resp.status_code == 200:
                 try:
                     payload = resp.json()

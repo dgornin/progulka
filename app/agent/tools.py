@@ -14,11 +14,14 @@ A slow source (Overpass can take a minute) is cut off after TOOL_TIMEOUT_S and
 reported as an error, so one tool call cannot eat the whole research budget.
 
 The days of a multi-day trip are researched in parallel, one ResearchState each, and
-share two things: the registry (a place one day found is known to all, and its
-enriched record serves every day) and the source queries (`searches`): days that
-start from the same point send the same searches at the same moment, before the HTTP
-cache has an answer, and one query serves them all. `taken` marks the places other
-days of the trip have planned: never shown, never shortlisted.
+share two things: the registry (a place one day found is known to all) and the
+source queries (`searches`): days that start from the same point send the same
+searches at the same moment, before the HTTP cache has an answer, and one query
+serves them all. Each day still looks places up in its own records first (`seen`):
+an OSM element's kind depends on the categories searched, and a day's tool results
+must not depend on which day registered a place first, or a rehearsed run stops
+replaying from the LLM cache. `taken` marks the places other days of the trip have
+planned or the traveller removed there: never shown, never shortlisted.
 """
 
 import asyncio
@@ -32,7 +35,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from app.models import MUST_HAVE_WEIGHT, Candidate, GeoPoint, Place, TripBrief
+from app.models import MUST_HAVE_WEIGHT, Candidate, GeoPoint, Place, TripBrief, clip
 from app.planning.geo import haversine_m
 from app.planning.validator import names_place
 from app.sources import osm, wikipedia, wikivoyage
@@ -61,13 +64,16 @@ class ResearchState:
     excluded: set[str] = field(default_factory=set)  # ids the traveller rejected
     finish_attempts: int = 0  # finish_research calls in the current research run
     # Transient, never saved (exclude=True): set by the pipeline before every run, from
-    # what the other days have planned at that moment.
+    # what the other days have planned (or had rejected) at that moment.
     taken: Annotated[set[str], Field(exclude=True)] = field(default_factory=set)
     # Transient: source query key -> _Search, shared by the days of one planning run.
     searches: Annotated[dict[str, Any], Field(exclude=True)] = field(default_factory=dict)
+    # Transient: this day's own record of every place its tools returned (see the module
+    # docstring); after a restart lookups fall back to the registry.
+    seen: Annotated[dict[str, Place], Field(exclude=True)] = field(default_factory=dict)
 
     def available(self) -> dict[str, Candidate]:
-        """The shortlist without the places other days of the trip have planned."""
+        """The shortlist without the places other days of the trip have taken."""
         return {pid: c for pid, c in self.shortlist.items() if pid not in self.taken}
 
 
@@ -151,7 +157,7 @@ class ShortlistPlace(BaseModel):
     @classmethod
     def _clip_reason(cls, value: str) -> str:
         # Models count characters badly: clip instead of spending a step on a retry.
-        return _clip(value, REASON_CHARS)
+        return clip(value, REASON_CHARS)
 
 
 class RemovePlace(BaseModel):
@@ -236,6 +242,22 @@ def min_candidates(brief: TripBrief) -> int:
     return max(4, ceil(max(end - start, 0) / 60 * 1.3))
 
 
+def same_place(a: Place, b: Place) -> bool:
+    """Two records of one real place from different sources: the same Wikidata/Wikipedia
+    link, or one name containing the other within SAME_PLACE_M. The shortlist and the
+    pipeline's choice of stops both use it, so a sight is planned once per trip.
+
+    Only records from different sources are compared: within one source, two nearby
+    places with similar names (two murals called "Мурал") are different places.
+    """
+    if a.source == b.source:
+        return False
+    if any(a.tags.get(k) and a.tags[k] == b.tags.get(k) for k in LINK_TAGS):
+        return True
+    name, other = a.name.casefold(), b.name.casefold()
+    return (name in other or other in name) and _metres(a, b) < SAME_PLACE_M
+
+
 async def _search_osm(state: ResearchState, args: SearchOsm) -> ToolOutcome:
     places = await _shared(
         state,
@@ -283,7 +305,7 @@ async def _get_place_details(state: ResearchState, args: GetPlaceDetails) -> Too
         if extract:
             # Keep the full text: the writer grounds its blurbs on place.description.
             place = place.model_copy(update={"description": extract})
-            state.registry[place.id] = place
+            state.seen[place.id] = state.registry[place.id] = place
             if place.id in state.shortlist:
                 state.shortlist[place.id].place = place
     details = {
@@ -441,6 +463,7 @@ def _search_outcome(state: ResearchState, places: list[Place], label: str) -> To
         # days researched beside it looked up first, or a rehearsed run stops replaying
         # from the LLM cache.
         state.registry.setdefault(place.id, place)
+        state.seen.setdefault(place.id, place)
         found.append(place)
     found.sort(key=lambda p: _distance_m(state.start, p))
     shown = [_compact(state, p) for p in found[:MAX_RESULTS_SHOWN]]
@@ -462,7 +485,7 @@ def _compact(state: ResearchState, place: Place) -> dict[str, Any]:
     if place.opening_hours:
         item["hours"] = place.opening_hours
     if place.description:
-        item["snippet"] = _clip(place.description, SNIPPET_CHARS)
+        item["snippet"] = clip(place.description, SNIPPET_CHARS)
     return item
 
 
@@ -473,7 +496,7 @@ def _lookup(state: ResearchState, place_id: str) -> Place:
         raise ToolRejected(
             f"'{place_id}' is already in the route of another day of the trip; choose another place"
         )
-    place = state.registry.get(place_id)
+    place = state.seen.get(place_id) or state.registry.get(place_id)
     if place is None:
         raise ToolRejected(
             f"unknown place_id '{place_id}': use an id exactly as a search tool returned it"
@@ -482,22 +505,8 @@ def _lookup(state: ResearchState, place_id: str) -> Place:
 
 
 def _same_place_on_shortlist(state: ResearchState, place: Place) -> Place | None:
-    """A shortlisted record of the same real place from another source: the same
-    Wikidata/Wikipedia link, or one name containing the other within SAME_PLACE_M.
-
-    Only records from different sources are compared: within one source, two nearby
-    places with similar names (two murals called "Мурал") are different places.
-    """
-    name = place.name.casefold()
-    for other in (c.place for c in state.shortlist.values()):
-        if other.source == place.source:
-            continue
-        linked = any(place.tags.get(k) and place.tags[k] == other.tags.get(k) for k in LINK_TAGS)
-        other_name = other.name.casefold()
-        namesake = name in other_name or other_name in name
-        if linked or (namesake and _metres(place, other) < SAME_PLACE_M):
-            return other
-    return None
+    """A shortlisted record of the same real place from another source."""
+    return next((c.place for c in state.shortlist.values() if same_place(place, c.place)), None)
 
 
 def _missing_for_finish(state: ResearchState) -> list[str]:
@@ -546,11 +555,6 @@ def _metres(a: GeoPoint | Place, b: Place) -> float:
 
 def _minutes(t: time) -> int:
     return t.hour * 60 + t.minute
-
-
-def _clip(text: str, limit: int) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def _json(payload: Any) -> str:

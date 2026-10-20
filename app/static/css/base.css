@@ -5,8 +5,8 @@
  * rules, near-black ink and one terracotta accent kept for the route and the main
  * action, so on a projector the eye lands on what matters. Spectral (serif) for names
  * and headings, Golos Text for the interface, JetBrains Mono for numbers, times and
- * tool calls. Token names are the ones the first UI used (--route, --paper, --rule,
- * ...), so planner styles written against them keep working and simply turn lighter.
+ * tool calls. Token names describe roles (--route for the route and the main action,
+ * --paper for tinted blocks, --rule for separators).
  *
  * Tokens (custom properties on :root)
  *   days    --day-1 ... --day-7   one colour per day of a journey (see the note below)
@@ -26,7 +26,7 @@
  *   .btn + .btn-primary | .btn-ghost | .btn-danger, .btn-sm | .btn-lg, .btn-block,
  *        .is-busy (striped "working" state)
  *   .field > label + .input | .textarea, .field-hint, .field-error (input[aria-invalid])
- *   .card [.card-pad]  white block;  .panel  tinted block
+ *   .card [.card-pad]  white block
  *   .chips > .chip      static pill: .is-strong .is-interest .is-must .is-avoid
  *        button.chip[aria-pressed=false|mixed|true]  toggle; "mixed" = interested, "true"
  *        = strongly; .chip-dots shows the level; [data-tone=avoid] for "do not suggest";
@@ -289,8 +289,6 @@ a { color: var(--route-deep); text-underline-offset: 3px; }
 @media (max-width: 640px) {
   .card-pad { padding: 20px; }
 }
-
-.panel { padding: 20px 22px; border-radius: var(--radius); background: var(--paper); }
 
 /* ---------- chips ---------- */
 

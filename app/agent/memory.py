@@ -12,8 +12,9 @@ the profile or the memory already says. Place texts from the sources are never r
 here, so a web page cannot plant a "fact". Code then trims, drops the duplicates the
 model missed and caps the count. Memory is best-effort: a provider failure, or an
 answer slower than MEMORY_TIMEOUT_S, learns nothing instead of failing the walk. The
-call runs before the finished plan is sent, so a hung provider must not hold it back
-for the minutes the LLM client's retries can take.
+finished plan is sent only after the call (on a new journey it runs beside the
+writers), so a hung provider must not hold it back for the minutes the LLM client's
+retries can take.
 
 Facts are written without asking: the traveller sees them in the profile and can
 delete any of them, so a wrong fact costs one click. We prefer reversibility to

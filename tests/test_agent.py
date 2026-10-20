@@ -27,6 +27,7 @@ from app.llm import LLM, ChatTurn, LLMError, ToolCall
 from app.models import AgentEvent, GeoPoint, Interest, Place, Plan, Stop, TripBrief
 from app.sources import osm, wikipedia, wikivoyage
 from app.sources.http import SourceError
+from tests.test_speech import provider
 
 START = GeoPoint(lat=59.9343, lon=30.3351, label="Невский проспект")
 
@@ -103,11 +104,12 @@ def sources(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
 
 class FakeLLM:
     """Replays scripted replies (an exception is raised instead of returned) and keeps
-    a snapshot of every conversation it was sent."""
+    a snapshot of every conversation it was sent. Structured replies come in call order,
+    or by schema name for calls that run at the same time."""
 
-    def __init__(self, turns: list[Any] = (), structured: list[Any] = ()):
+    def __init__(self, turns: list[Any] = (), structured: list[Any] | dict[str, list[Any]] = ()):
         self.turns = list(turns)
-        self.structured_replies = list(structured)
+        self.structured_replies = structured if isinstance(structured, dict) else list(structured)
         self.seen: list[list[dict[str, Any]]] = []
 
     async def chat(self, messages, tools=None, **_):
@@ -116,7 +118,10 @@ class FakeLLM:
 
     async def structured(self, messages, schema, **_):
         self.seen.append(messages)
-        return schema.model_validate(self._next(self.structured_replies))
+        replies = self.structured_replies
+        if isinstance(replies, dict):
+            replies = replies[schema.__name__]
+        return schema.model_validate(self._next(replies))
 
     @staticmethod
     def _next(replies: list[Any]) -> Any:
@@ -457,7 +462,32 @@ async def test_a_day_sees_the_sources_record_whatever_another_day_looked_up() ->
 
     [shown] = json.loads(outcome.content)["places"]
     assert shown["snippet"] == SINGER.description  # not the extract the first day fetched
-    assert second.registry[SINGER.id].description == EXTRACT  # the writer still gets it
+    assert first.registry[SINGER.id].description == EXTRACT  # saved with the first day
+
+
+async def test_each_day_looks_a_place_up_in_its_own_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One building in two categories: its record depends on the category searched.
+    as_cafe = MUSEUM.model_copy(update={"kind": "cafe", "indoor": None})
+
+    async def search_places(center, radius_m, categories, limit=40):
+        return [MUSEUM if "museum" in categories else as_cafe]
+
+    monkeypatch.setattr(osm, "search_places", search_places)
+    first, second = make_state(), make_state()
+    second.registry = first.registry
+    await run_tool(first, "search_osm", categories=["museum"])
+    await run_tool(second, "search_osm", categories=["cafe"])
+
+    details = [
+        json.loads((await run_tool(day, "get_place_details", place_id=MUSEUM.id)).content)
+        for day in (first, second)
+    ]
+    await run_tool(second, "shortlist_place", place_id=MUSEUM.id, **SHORTLIST_ARGS)
+
+    assert [d["kind"] for d in details] == ["museum", "cafe"]
+    assert second.shortlist[MUSEUM.id].place.kind == "cafe"
 
 
 async def test_a_search_its_last_day_gave_up_on_is_not_awaited_by_the_next() -> None:
@@ -733,3 +763,38 @@ async def test_provider_error_passes_on_only_the_providers_message() -> None:
     with pytest.raises(LLMError) as error:
         await LLM(client=client, model="test").chat([{"role": "user", "content": "hi"}])
     assert (str(error.value), error.value.status) == ("No auth credentials found", 401)
+
+
+async def test_answers_are_recorded_and_replayed_only_with_replay_on(tmp_path) -> None:
+    sent: list[dict[str, Any]] = []
+    hi = [{"role": "user", "content": "hi"}]
+
+    await LLM(client=provider(sent), model="test", cache_dir=tmp_path).chat(hi)
+    assert not list(tmp_path.iterdir())  # replay off: no visitor's words kept on disk
+
+    replaying = LLM(client=provider(sent), model="test", cache_dir=tmp_path, replay=True)
+    first, second = await replaying.chat(hi), await replaying.chat(hi)
+
+    assert first.content == second.content and len(sent) == 2
+    assert (replaying.usage.calls, replaying.usage.cached_calls) == (1, 1)
+
+
+async def test_a_short_call_has_its_own_timeout_and_the_same_replay_key(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[dict[str, Any]] = []
+    llm = LLM(client=provider(sent), model="test", cache_dir=tmp_path, replay=True)
+    create = llm.client.chat.completions.create
+    timeouts: list[float | None] = []
+
+    async def spy(**request: Any) -> Any:
+        timeouts.append(request.get("timeout"))
+        return await create(**request)
+
+    monkeypatch.setattr(llm.client.chat.completions, "create", spy)
+    hi = [{"role": "user", "content": "hi"}]
+
+    await llm.chat(hi, timeout=25)
+    await llm.chat(hi)  # the same request with the client's own timeout: replayed
+
+    assert timeouts == [25] and llm.usage.cached_calls == 1

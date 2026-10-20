@@ -51,7 +51,11 @@ function tiles(stats) {
     "div",
     { class: "tiles" },
     tile("Пользователи", number(stats.users), plural(stats.users, "аккаунт", "аккаунта", "аккаунтов")),
-    tile("Путешествия", number(stats.journeys), `${number(stats.journeys_today)} сегодня · ${number(stats.trips)} маршрутов дней`),
+    tile(
+      "Путешествия",
+      number(stats.journeys),
+      `${number(stats.journeys_today)} сегодня · ${number(stats.days)} маршрутов дней, ${number(stats.days_today)} сегодня`,
+    ),
     budget
       ? tile("LLM сегодня", usd(stats.llm_cost_today), `из ${usd(budget)} дневного бюджета`, meter(stats.llm_cost_today, budget))
       : tile("LLM сегодня", usd(stats.llm_cost_today), "дневной бюджет не ограничен"),
@@ -98,15 +102,17 @@ const USER_COLUMNS = [
   ["Имя", (user) => user.name],
   ["Роль", (user) => (user.is_admin ? h("span", { class: "tag is-admin" }, "админ") : "")],
   ["Регистрация", (user) => when(user.created_at)],
-  ["Прогулок", (user) => number(user.trips), true],
+  ["Путешествий", (user) => number(user.journeys), true],
+  ["Дней", (user) => number(user.days), true],
   ["LLM", (user) => usd(user.cost_usd), true],
 ];
 
 const TRIP_COLUMNS = [
   ["Путешествие", (trip) => h("span", { class: "cell-title" }, trip.title)],
   ["Город", (trip) => trip.city],
+  ["Дней", (trip) => number(trip.days), true],
   ["Владелец", (trip) => trip.owner_email],
-  ["Изменена", (trip) => when(trip.updated_at)],
+  ["Изменено", (trip) => when(trip.updated_at)],
   ["LLM", (trip) => usd(trip.cost_usd), true],
 ];
 

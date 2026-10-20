@@ -29,8 +29,8 @@ from datetime import date, timedelta
 from pydantic import BaseModel, Field
 
 from app.agent.prompts import OUTLINE
-from app.llm import LLM
-from app.models import MUST_HAVE_WEIGHT, DayOutline, GeoPoint, TripBrief
+from app.llm import LLM, SHORT_REQUEST_TIMEOUT_S
+from app.models import MUST_HAVE_WEIGHT, DayOutline, GeoPoint, TripBrief, clip
 from app.planning.geo import haversine_m
 from app.sources import geocode
 from app.sources.http import SourceError
@@ -99,8 +99,8 @@ async def draft_days(
         {"role": "system", "content": OUTLINE.format(max_km=MAX_AREA_KM)},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
-    draft = await llm.structured(messages, OutlineDraft)
-    title = _short(draft.title, TITLE_CHARS) or f"{brief.city}, {dates[0]:%d.%m}–{dates[-1]:%d.%m}"
+    draft = await llm.structured(messages, OutlineDraft, timeout=SHORT_REQUEST_TIMEOUT_S)
+    title = clip(draft.title, TITLE_CHARS) or f"{brief.city}, {dates[0]:%d.%m}–{dates[-1]:%d.%m}"
     return title, _checked(draft, brief, dates)
 
 
@@ -134,9 +134,9 @@ def _checked(draft: OutlineDraft, brief: TripBrief, dates: list[date]) -> list[D
             DayOutline(
                 index=index,
                 date=day,
-                theme=_short(proposal.theme, THEME_CHARS),
+                theme=clip(proposal.theme, THEME_CHARS),
                 focus=list(dict.fromkeys(focus)),
-                area=_short(proposal.area or "", THEME_CHARS) or None,
+                area=clip(proposal.area or "", THEME_CHARS) or None,
                 must_include=places,
             )
         )
@@ -162,8 +162,3 @@ async def _locate(area: str, brief: TripBrief, start: GeoPoint) -> GeoPoint | No
     # Not an error for the traveller: the day starts from the hotel instead.
     log.info("outline: area %r in %s is %s", area, brief.city, "too far" if found else "unknown")
     return None
-
-
-def _short(text: str, limit: int) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"

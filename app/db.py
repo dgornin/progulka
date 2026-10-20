@@ -128,12 +128,12 @@ class Journey(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
 
 
-class Trip(Base):
+class Day(Base):
     """One day of a journey: its route and the research state feedback continues from."""
 
-    __tablename__ = "trips"
+    __tablename__ = "trips"  # historical: a trip became a day of a journey
 
-    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # pipeline TripRun.id
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # pipeline DayRun.id
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     journey_id: Mapped[str] = mapped_column(
         ForeignKey("journeys.id", ondelete="CASCADE"), index=True
@@ -202,7 +202,9 @@ def _journeys_from_trips(conn: Connection) -> None:
         )
     if "day_index" not in columns:
         conn.exec_driver_sql("ALTER TABLE trips ADD COLUMN day_index INTEGER NOT NULL DEFAULT 0")
-    if "request" in columns:
+    # All of them, not just one: a start interrupted between the DROP COLUMNs below
+    # left some (each DDL commits on its own when there was no row to copy).
+    if columns.issuperset(_MOVED_TO_JOURNEY):
         old = conn.execute(
             text(
                 "SELECT id, user_id, title, city, date, request, preferences, state, history,"
@@ -218,14 +220,14 @@ def _journeys_from_trips(conn: Connection) -> None:
         ).all()
         if old:
             conn.execute(insert(Journey), [_journey_of_trip(row._mapping) for row in old])
-            conn.execute(update(Trip).where(Trip.journey_id.is_(None)).values(journey_id=Trip.id))
+            conn.execute(update(Day).where(Day.journey_id.is_(None)).values(journey_id=Day.id))
     moved = [column for column in _MOVED_TO_JOURNEY if column in columns]
     if moved:
         # SQLite does not drop an indexed column.
         conn.exec_driver_sql("DROP INDEX IF EXISTS ix_trips_updated_at")
         for column in moved:
             conn.exec_driver_sql(f"ALTER TABLE trips DROP COLUMN {column}")
-    for index in Trip.__table__.indexes:
+    for index in Day.__table__.indexes:
         index.create(conn, checkfirst=True)
 
 

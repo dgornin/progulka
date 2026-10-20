@@ -43,6 +43,7 @@ async def transcribe(llm: LLM, audio_wav_b64: str) -> tuple[str, float]:
                 temperature=0,
                 max_tokens=MAX_TRANSCRIPT_TOKENS,
                 model=settings.stt_model,
+                cache=False,  # a recording never repeats: storing it would only keep it
             )
     except TimeoutError as e:
         raise PipelineError("Распознавание речи не ответило вовремя, попробуйте ещё раз") from e

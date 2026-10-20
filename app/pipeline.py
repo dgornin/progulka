@@ -7,8 +7,8 @@ pipeline and one agent loop inside every day.
     -> research: one ReAct agent per day, the days in parallel
     -> per day, in order: optimize (code) -> walking route (OSRM) -> validate (code)
        -> one bounded repair round if the validator found errors
-    -> texts (LLM, structured output), the days in parallel
-    -> long-term memory (LLM, structured output)
+    -> texts (LLM, structured output), the days in parallel, and beside them
+       long-term memory (LLM, structured output): it reads only the request
 
 A trip of several days is Plan-and-Execute (lecture 04): the outline is the plan (a
 theme, the focus interests, an area and the named places of every day,
@@ -24,11 +24,13 @@ they share one registry and one set of source queries (app/agent/tools.py), at m
 MAX_PARALLEL_DAYS at a time to stay polite to Overpass and the LLM provider. Choosing
 stops is where they do depend on each other: a place belongs to one day. So the
 optimizer runs day by day over the pool of all the shortlists minus what earlier days
-took. A day's own candidates keep their score and another day's get
-x OTHER_DAY_FACTOR: each day prefers what its own research found, yet can use a good
-place another day did not need. Such a place moves to this day's shortlist, so a
-later edit of the day keeps it. A place the traveller named waits for the day the
-outline gave it, whichever day's research found it.
+took, compared by real place, not by id (tools.same_place: the Wikipedia article of
+a cathedral an earlier day visits is out too). A day's own candidates keep their
+score and another day's get x OTHER_DAY_FACTOR: each day prefers what its own
+research found, yet can use a good place another day did not need. Such a place
+moves to this day's shortlist, so a later edit of the day keeps it. A place the
+traveller named waits for the day the outline gave it, whichever day's research
+found it.
 
 Only the research step is an agent, because only there the next step depends on
 what was found. Everything that can be computed (geocoding, time arithmetic, route
@@ -36,9 +38,10 @@ order, opening hours) is code, and the validator is the external critic the repa
 round listens to.
 
 Feedback on a day re-enters at research (when new places are needed) or at
-optimize, with the stops of the other days taken, and every route, first or
-rebuilt, goes through the same validation and repair round. A failed feedback run
-is not saved: the caller stores the trip only after success.
+optimize, with the stops of the other days and the places removed from them taken,
+and every route, first or rebuilt, goes through the same validation and repair
+round. A failed feedback run is not saved: the caller stores the trip only after
+success.
 
 Personal context: the planner panel, the request, the profile and later the feedback
 are merged into the brief by code (app/personalization.py); long-term memory and the
@@ -63,10 +66,10 @@ from app.agent.outline import draft_days, locate_areas, one_day, trip_dates
 from app.agent.prompts import DAY_GOAL, REPAIR_GOAL, REPLACE_GOAL
 from app.agent.replanner import PlanEdit, interpret_feedback
 from app.agent.researcher import ResearchResult, research
-from app.agent.tools import ResearchState
+from app.agent.tools import ResearchState, same_place
 from app.agent.writer import write_texts
 from app.config import settings
-from app.llm import LLM
+from app.llm import LLM, LLMError
 from app.models import (
     MAX_DAYS,
     AgentEvent,
@@ -178,7 +181,7 @@ class FeedbackRequest(BaseModel):
 
 
 @dataclass
-class TripRun:
+class DayRun:
     """One day's working state: what a feedback run continues from. The id is the day's."""
 
     id: str
@@ -189,14 +192,14 @@ class TripRun:
 
 @dataclass
 class Journey:
-    """A trip of one or more days in one city. The id is the trip's."""
+    """A journey of one or more days in one city. The id is the journey's."""
 
     id: str
-    brief: TripBrief  # the whole trip: date..date_to; each day's brief is in its state
+    brief: TripBrief  # the whole journey: date..date_to; each day's brief is in its state
     start: GeoPoint  # where the traveller stays
     title: str
     outline: list[DayOutline]
-    days: list[TripRun]  # one per outline day, in order
+    days: list[DayRun]  # one per outline day, in order
     # New long-term memory facts learned in the last run, for the caller to store.
     learned: list[str] = field(default_factory=list)
 
@@ -235,14 +238,7 @@ async def plan_journey(
         "weather",
         "done",
         "Погода: " + "; ".join(_by_day(dates, summaries)),
-        {
-            "summary": summaries[0],
-            "start": start.model_dump(),
-            "days": [
-                {"date": day.isoformat(), "summary": summary}
-                for day, summary in zip(dates, summaries, strict=True)
-            ],
-        },
+        {"start": start.model_dump()},  # the map flies there; the forecasts are in the label
     )
 
     title, outline = await _outline(llm, emit, brief, start, summaries)
@@ -250,7 +246,7 @@ async def plan_journey(
     registry: dict[str, Place] = {}
     searches: dict[str, Any] = {}
     days = [
-        TripRun(
+        DayRun(
             id=_new_id(),
             state=ResearchState(
                 brief=_day_brief(brief, day, len(outline)),
@@ -264,21 +260,38 @@ async def plan_journey(
         for day, hours, summary in zip(outline, forecasts, summaries, strict=True)
     ]
     facts = traveller_facts(profile, memory or [])
+    failures: list[LLMError] = []
 
-    results = await _each_day(
-        len(days),
-        lambda i: _research(
-            days[i],
-            llm,
-            _for_day(emit, i),
-            goal=_day_goal(outline, i),
-            max_steps=settings.agent_max_steps,
-            time_budget_s=RESEARCH_BUDGET_S,
-            facts=facts,
-        ),
-    )
+    async def research_day(i: int) -> ResearchResult:
+        """On a trip of several days, a day whose LLM calls failed before it shortlisted
+        anything is built from the other days' places, like a day whose agent found
+        nothing: one failed day must not cancel the healthy ones. A single walk has no
+        other day to borrow from, and its error is reported as is."""
+        day_emit = _for_day(emit, i)
+        try:
+            return await _research(
+                days[i],
+                llm,
+                day_emit,
+                goal=_day_goal(outline, i),
+                max_steps=settings.agent_max_steps,
+                time_budget_s=RESEARCH_BUDGET_S,
+                facts=facts,
+            )
+        except LLMError as e:
+            if len(days) == 1:
+                raise
+            failures.append(e)
+            await stage(day_emit, "research", "done", "Поиск прерван: LLM-провайдер не ответил")
+            await day_emit(
+                _warning(f"День {i + 1}: LLM-провайдер не ответил, соберу день из мест других дней")
+            )
+            return ResearchResult([], "llm_error", 0)
+
+    results = await _each_day(len(days), research_day)
     if not any(day.state.shortlist for day in days):
-        raise _nothing_found(results[0])
+        # Every day failed or found nothing: the provider's error says more, if any.
+        raise failures[0] if failures else _nothing_found(results[0])
 
     plans = []
     scheduled: set[str] = set()
@@ -296,8 +309,11 @@ async def plan_journey(
                 day.state.shortlist[stop.place.id] = borrowed[stop.place.id]
         scheduled |= {stop.place.id for stop in plan.stops}
         plans.append(plan)
-    await _each_day(len(days), lambda i: _write(days[i], llm, _for_day(emit, i), plans[i], facts))
-    learned = await _learn(llm, emit, req.request, profile, memory)
+    # The memory call needs only the request, not the texts: it runs beside the writers.
+    _, learned = await asyncio.gather(
+        _each_day(len(days), lambda i: _write(days[i], llm, _for_day(emit, i), plans[i], facts)),
+        _learn(llm, emit, req.request, profile, memory),
+    )
     return Journey(
         id=_new_id(),
         brief=brief,
@@ -320,22 +336,21 @@ async def apply_day_feedback(
 ) -> tuple[Journey, str | None]:
     """Feedback on one day; the other days stay as they are and keep their stops.
 
-    `profile` and `memory` as in plan_journey; the brief was personalised when the trip
-    was planned, here they only inform the agent, the writer and the learning."""
-    if not 0 <= day_index < len(journey.days):
-        raise PipelineError("В этой поездке нет такого дня")
+    The caller checks `day_index` (main.feedback). `profile` and `memory` as in
+    plan_journey; the brief was personalised when the trip was planned, here they only
+    inform the agent, the writer and the learning."""
     day = journey.days[day_index]
-    if day.plan is None:
-        raise PipelineError("У этого дня ещё нет маршрута")
-    plan = day.plan
+    assert day.plan is not None  # store and plan_journey never keep a day without a route
+    # Unavailable: the other days' stops, and what the traveller removed from them,
+    # which may still be on this day's shortlist: a rejected place is rejected for the trip.
     day.state.taken = {
-        stop.place.id
+        pid
         for other in journey.days
-        if other is not day and other.plan
-        for stop in other.plan.stops
+        if other is not day
+        for pid in [*(stop.place.id for stop in other.plan.stops), *other.state.excluded]
     }
     facts = traveller_facts(profile, memory or [])
-    reply = await _feedback(day, plan, req, llm, _for_day(emit, day_index), facts)
+    reply = await _feedback(day, day.plan, req, llm, _for_day(emit, day_index), facts)
     if len(journey.days) == 1:
         journey.title = _single_title(day)  # a single walk is named after its route
     journey.learned = await _learn(llm, emit, req.feedback, profile, memory)
@@ -488,7 +503,7 @@ def _theme(day: DayOutline) -> str:
     return f"{theme}, around {day.area}" if day.area else theme
 
 
-def _named_elsewhere(days: list[TripRun], index: int) -> set[str]:
+def _named_elsewhere(days: list[DayRun], index: int) -> set[str]:
     """Shortlisted places the traveller named for another day: they wait for that day,
     whichever day's research found them."""
     mine = days[index].state.brief.must_include
@@ -502,7 +517,7 @@ def _named_elsewhere(days: list[TripRun], index: int) -> set[str]:
     }
 
 
-def _borrowed(days: list[TripRun], index: int, taken: set[str]) -> dict[str, Candidate]:
+def _borrowed(days: list[DayRun], index: int, taken: set[str]) -> dict[str, Candidate]:
     """Other days' candidates the day may use (see the module docstring): discounted,
     except a place the traveller named for this day, which the day must keep."""
     own = days[index].state
@@ -547,7 +562,7 @@ def _for_day(emit: Emit, index: int) -> Emit:
 
 
 async def _feedback(
-    trip_run: TripRun,
+    day: DayRun,
     plan: Plan,
     req: FeedbackRequest,
     llm: LLM,
@@ -578,11 +593,11 @@ async def _feedback(
         i: stops[i] for i in [*edit.exclude_place_ids, *req.exclude_place_ids] if i in stops
     }
 
-    _apply_edit(trip_run, edit, excluded)
+    _apply_edit(day, edit, excluded)
     await stage(emit, "feedback", "done", edit.reply, edit.model_dump(mode="json"))
     if edit.research_goal:
         result = await _research(
-            trip_run,
+            day,
             llm,
             emit,
             goal=edit.research_goal,
@@ -590,10 +605,10 @@ async def _feedback(
             time_budget_s=FEEDBACK_BUDGET_S,
             facts=facts,
         )
-        if not trip_run.state.available():
+        if not day.state.available():
             raise _nothing_found(result)
-    rebuilt = await _build_checked(trip_run, llm, emit, facts)
-    await _write(trip_run, llm, emit, rebuilt, facts)
+    rebuilt = await _build_checked(day, llm, emit, facts)
+    await _write(day, llm, emit, rebuilt, facts)
     return edit.reply
 
 
@@ -602,8 +617,9 @@ async def _learn(
 ) -> list[str]:
     """New long-term facts from the traveller's own words of this run.
 
-    Runs only after the run succeeded, and not for the "Убрать" button: an empty text
-    has nothing to learn from. A stage of its own: the plan is sent only after it.
+    Runs only once the routes are built (beside the writers of a new journey, after the
+    whole feedback run), and not for the "Убрать" button: an empty text has nothing to
+    learn from. A stage of its own: the journey is sent only after it.
     """
     if memory is None or not text.strip():
         return []
@@ -616,7 +632,7 @@ async def _learn(
 
 
 async def _research(
-    trip_run: TripRun,
+    day: DayRun,
     llm: LLM,
     emit: Emit,
     goal: str | None,
@@ -627,7 +643,7 @@ async def _research(
     await stage(emit, "research", "start", "Агент ищет места")
     result = await research(
         llm,
-        trip_run.state,
+        day.state,
         emit,
         max_steps=max_steps,
         goal=goal,
@@ -657,7 +673,7 @@ def _nothing_found(result: ResearchResult) -> PipelineError:
 
 
 async def _build_checked(
-    trip_run: TripRun,
+    day: DayRun,
     llm: LLM,
     emit: Emit,
     facts: Sequence[str],
@@ -668,23 +684,29 @@ async def _build_checked(
     The validator's findings become the research agent's goal. A route with no stops
     is never returned as a result.
     """
-    plan = await _build(trip_run, emit, borrowed)
+    plan = await _build(day, emit, borrowed)
     errors = [v for v in plan.violations if v.severity == "error"]
     if errors:
         await stage(emit, "repair", "start", "Валидатор нашёл проблемы — агент исправляет")
         # The messages stay in the traveller's language: they are data for the agent.
         goal = REPAIR_GOAL.format(problems="\n".join(f"- {v.message}" for v in errors))
-        result = await research(
-            llm,
-            trip_run.state,
-            emit,
-            max_steps=REPAIR_STEPS,
-            goal=goal,
-            time_budget_s=REPAIR_BUDGET_S,
-            traveller_facts=facts,
-        )
-        plan = await _build(trip_run, emit, borrowed)
-        await stage(emit, "repair", "done", "Исправление завершено", {"steps": result.steps})
+        try:
+            result = await research(
+                llm,
+                day.state,
+                emit,
+                max_steps=REPAIR_STEPS,
+                goal=goal,
+                time_budget_s=REPAIR_BUDGET_S,
+                traveller_facts=facts,
+            )
+        except LLMError:
+            # Raised only for a day with no shortlist of its own, built from the other
+            # days' places: it keeps the route as built, the validator's errors shown.
+            await stage(emit, "repair", "done", "Исправить не удалось: LLM-провайдер не ответил")
+        else:
+            plan = await _build(day, emit, borrowed)
+            await stage(emit, "repair", "done", "Исправление завершено", {"steps": result.steps})
     if not plan.stops:
         raise PipelineError(
             "Не удалось собрать маршрут: ни одно найденное место не подошло. "
@@ -693,30 +715,36 @@ async def _build_checked(
     return plan
 
 
-async def _write(trip_run: TripRun, llm: LLM, emit: Emit, plan: Plan, facts: Sequence[str]) -> None:
+async def _write(day: DayRun, llm: LLM, emit: Emit, plan: Plan, facts: Sequence[str]) -> None:
     await stage(emit, "write", "start", "Пишу описания остановок")
-    trip_run.plan = await write_texts(llm, plan, facts)
+    day.plan = await write_texts(llm, plan, facts)
     await stage(emit, "write", "done", "Маршрут готов")
 
 
-async def _build(
-    trip_run: TripRun, emit: Emit, borrowed: Mapping[str, Candidate] | None = None
-) -> Plan:
+async def _build(day: DayRun, emit: Emit, borrowed: Mapping[str, Candidate] | None = None) -> Plan:
     """`borrowed`: other days' candidates this day may use (see _borrowed)."""
-    state = trip_run.state
+    state = day.state
     pool = {**(borrowed or {}), **state.shortlist}
-    # What the traveller rejected, what other days took, and what the current avoid
-    # list rules out.
-    candidates = [
-        c
-        for pid, c in pool.items()
-        if pid not in state.excluded
-        and pid not in state.taken
-        and not any(matches_avoid(a, c.place.kind, c.place.name) for a in state.brief.avoid)
-    ]
+    # Out: what the traveller rejected, what other days took, what the current avoid
+    # list rules out, and any other source's record of those places or of a candidate
+    # already kept. Ids alone miss the Wikipedia article of an OSM stop; the registry
+    # is shared, so it holds the other days' stops too.
+    blocked = [state.registry[p] for p in state.taken | state.excluded if p in state.registry]
+    candidates: list[Candidate] = []
+    # The day's own shortlist first, so of two records of a place it keeps its own (the
+    # optimizer sorts by id itself: the order matters only there).
+    for pid, c in sorted(pool.items(), key=lambda item: item[0] not in state.shortlist):
+        if (
+            pid in state.excluded
+            or pid in state.taken
+            or any(matches_avoid(a, c.place.kind, c.place.name) for a in state.brief.avoid)
+            or any(same_place(c.place, p) for p in [*blocked, *(k.place for k in candidates)])
+        ):
+            continue
+        candidates.append(c)
 
     await stage(emit, "optimize", "start", "Строю порядок обхода")
-    result = optimize(candidates, state.start, state.brief, trip_run.weather)
+    result = optimize(candidates, state.start, state.brief, day.weather)
     order: list[Candidate] = list(result.order)
     dropped = list(result.dropped)
     await stage(
@@ -771,7 +799,7 @@ async def _build(
         dropped=dropped,
     )
     await stage(emit, "validate", "start", "Проверяю маршрут")
-    plan.violations = validate(plan, trip_run.weather)
+    plan.violations = validate(plan, day.weather)
     n_err = sum(v.severity == "error" for v in plan.violations)
     n_warn = len(plan.violations) - n_err
     await stage(
@@ -784,9 +812,9 @@ async def _build(
     return plan
 
 
-def _apply_edit(trip_run: TripRun, edit: PlanEdit, excluded: dict[str, str]) -> None:
+def _apply_edit(day: DayRun, edit: PlanEdit, excluded: dict[str, str]) -> None:
     """`excluded`: the stops the traveller removed, id -> name."""
-    state = trip_run.state
+    state = day.state
     # A new avoid phrase applies to the whole shortlist at once, so the rebuilt route
     # cannot pick an avoided place that did not fit before.
     avoided = {
@@ -822,7 +850,7 @@ def _apply_edit(trip_run: TripRun, edit: PlanEdit, excluded: dict[str, str]) -> 
     if edit.rain_from:
         # The traveller's own forecast wins: mark those hours rainy, and the optimizer
         # and validator treat outdoor stops in them exactly as they treat forecast rain.
-        trip_run.weather = _with_rain(trip_run.weather, state.brief, edit.rain_from)
+        day.weather = _with_rain(day.weather, state.brief, edit.rain_from)
         state.weather_summary += f"; the traveller expects rain from {edit.rain_from:%H:%M}"
 
 
@@ -837,7 +865,7 @@ def _with_rain(hours: list[HourWeather], brief: TripBrief, rain_from: time) -> l
     return sorted(by_time.values(), key=lambda h: h.time)
 
 
-def _single_title(day: TripRun) -> str:
+def _single_title(day: DayRun) -> str:
     brief = day.state.brief
     return (day.plan and day.plan.title) or f"{brief.city}, {brief.date:%d.%m.%Y}"
 

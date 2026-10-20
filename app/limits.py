@@ -13,7 +13,9 @@ slot and has a per-address window of its own (app/main.py). Its spend is not sav
 with a journey, so a restart forgets it: fractions of a cent per minute of speech.
 
 The limits are per address, not per account: registration is free, so an account is
-not a scarce resource, and a limit per account would not bound the spend.
+not a scarce resource, and a limit per account would not bound the spend. The one
+exception is the admin, whose account is never published: exempt from every check, so
+a classroom behind one NAT cannot lock the operator out of the live demo.
 """
 
 import time
@@ -70,15 +72,20 @@ class Limits:
         self._day: date = datetime.now(UTC).date()
         self._spent_usd = 0.0
 
-    def admit(self, client: str) -> str | None:
-        """Register a run and return None, or return why it is refused (in Russian)."""
-        if self.out_of_budget():
-            return BUDGET_SPENT
-        if self.max_concurrent and self.running >= self.max_concurrent:
-            return "Сейчас строится слишком много маршрутов, попробуйте через минуту"
-        if self._runs.full(client):
-            return f"Не больше {self.per_hour} маршрутов в час с одного адреса"
-        self._runs.add(client)
+    def admit(self, client: str, exempt: bool = False) -> str | None:
+        """Register a run and return None, or return why it is refused (in Russian).
+
+        An `exempt` run (the admin's) passes every check and stays out of the address's
+        window; it still counts in `running`, so release() stays symmetric, and its
+        spend counts toward the budget."""
+        if not exempt:
+            if self.out_of_budget():
+                return BUDGET_SPENT
+            if self.max_concurrent and self.running >= self.max_concurrent:
+                return "Сейчас строится слишком много маршрутов, попробуйте через минуту"
+            if self._runs.full(client):
+                return f"Не больше {self.per_hour} маршрутов в час с одного адреса"
+            self._runs.add(client)
         self.running += 1
         return None
 

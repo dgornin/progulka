@@ -101,3 +101,13 @@ async def test_a_slow_or_failing_speech_model_is_an_error_the_traveller_can_read
         await transcribe(SlowLLM(), AUDIO)
     with pytest.raises(PipelineError, match="Не удалось распознать речь: No endpoints"):
         await transcribe(FailingLLM(), AUDIO)
+
+
+async def test_a_recording_is_never_stored_nor_replayed(tmp_path) -> None:
+    sent: list[dict[str, Any]] = []
+    llm = LLM(client=provider(sent), model="test/planner", cache_dir=tmp_path, replay=True)
+
+    await transcribe(llm, AUDIO)
+    await transcribe(llm, AUDIO)
+
+    assert len(sent) == 2 and not list(tmp_path.iterdir())

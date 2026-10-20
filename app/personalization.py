@@ -7,7 +7,7 @@ stated in one line. Precedence, highest first:
     the planner form (fields and the "больше / меньше" panel)
     > the request text (what the brief LLM extracted)
     > the profile (the onboarding questionnaire)
-    > hard defaults (10:00, five hours, normal pace)
+    > hard defaults (10:00–18:00, normal pace; app/agent/brief.py)
 
 Scalars (city, pace, children, distance) are resolved in parse_brief: the form's
 values are overrides, the profile's are defaults for what the text leaves null.
@@ -128,7 +128,7 @@ def profile_facts(profile: Profile | None) -> list[str]:
         return []
     facts = []
     if profile.home_city:
-        facts.append(f"Домашний город: {profile.home_city}")
+        facts.append(f"Город по умолчанию для поездок: {profile.home_city}")
     if profile.interests:
         labels = [
             INTERESTS[key].label + (" (очень)" if weight == LOVE else "")

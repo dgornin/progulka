@@ -12,7 +12,8 @@ Every run ends with an explicit, logged stop reason:
   (the second time it is not executed and the model gets an error instead);
 - no_tool_calls: two replies in a row without tool calls (the first gets a nudge);
 - llm_error: the provider failed after its retries, but the shortlist is not empty
-  (with an empty shortlist the error propagates: there is nothing to plan from).
+  (with an empty shortlist the error propagates: there is nothing to plan from; on a
+  trip of several days app/pipeline.py builds that day from the other days' places).
 Whatever the reason, the shortlist built so far is the result.
 """
 

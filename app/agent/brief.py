@@ -4,7 +4,7 @@ The model only extracts what the traveller said, into a draft where every unknow
 is null. Everything else is code, so it is the same on every run and does not
 depend on how the model reads the request: each field is the first value set in
 the form's overrides, the draft, the profile's defaults, the hard defaults (today,
-10:00, five hours, normal pace), followed by the sanity checks.
+10:00–18:00 (DEFAULT_START, DEFAULT_HOURS), normal pace), followed by the sanity checks.
 
 Dates of a multi-day trip: the model reports the range as said ("с 24 по 28 октября"
 -> both dates, "5 дней" -> a count) and code turns it into date..date_to. The length
@@ -24,7 +24,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.prompts import BRIEF
-from app.llm import LLM
+from app.llm import LLM, SHORT_REQUEST_TIMEOUT_S
 from app.models import Interest, LocalTime, Pace, TripBrief
 from app.profile import INTERESTS
 
@@ -147,7 +147,9 @@ async def _extract(llm: LLM, request_text: str, today: dt.date) -> BriefDraft:
     system = BRIEF.format(topics=", ".join(f"«{spec.label}»" for spec in INTERESTS.values()))
     prompt = f"Today is {today.isoformat()} ({today.strftime('%A')}).\nRequest:\n{request_text}"
     return await llm.structured(
-        [{"role": "system", "content": system}, {"role": "user", "content": prompt}], BriefDraft
+        [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        BriefDraft,
+        timeout=SHORT_REQUEST_TIMEOUT_S,
     )
 
 

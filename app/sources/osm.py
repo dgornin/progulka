@@ -27,7 +27,8 @@ from app.sources.http import SourceError, http
 
 # Public Overpass instances are often overloaded (the main one answered in 40 s or
 # with 502 while we built this), so each gets one short attempt and the first one
-# that answers becomes the preferred instance for the next queries.
+# that answers becomes the preferred instance for the next queries; a preferred one
+# that fails passes that on to the next at once.
 OVERPASS_TIMEOUT_S = 10.0
 _preferred = 0
 MAX_RADIUS_M = 5000
@@ -226,6 +227,8 @@ async def _overpass(query: str) -> list[dict]:
             )
         except SourceError as e:
             errors.append(str(e))
+            if _preferred == i:
+                _preferred = (i + 1) % len(urls)  # queries from now on start at the next
             continue
         if not _is_complete(payload):
             errors.append(f"{urls[i]}: {payload.get('remark')}")

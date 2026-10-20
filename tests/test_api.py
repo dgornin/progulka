@@ -187,7 +187,7 @@ def test_traveller_plans_continues_and_deletes_a_journey(client, pipeline):
     assert data["usage"]["cost_usd"] == 0.01
     view = data["journey"]
     assert (view["id"], view["date_from"], view["date_to"]) == ("j1", "2026-10-24", "2026-10-26")
-    assert [(d["index"], d["trip_id"], d["date"], d["theme"]) for d in view["days"]] == [
+    assert [(d["index"], d["day_id"], d["date"], d["theme"]) for d in view["days"]] == [
         (0, "j1-0", "2026-10-24", "Тема дня 1"),
         (1, "j1-1", "2026-10-25", "Тема дня 2"),
         (2, "j1-2", "2026-10-26", "Тема дня 3"),
@@ -340,6 +340,21 @@ def test_runs_are_rate_limited_per_address(client, monkeypatch):
     assert main.busy_journeys == set()  # a refused feedback does not leave the journey locked
 
 
+def test_the_admin_is_never_rate_limited(client, speech, monkeypatch):
+    monkeypatch.setattr(main, "limits", Limits(per_hour=1, daily_budget_usd=0, max_concurrent=1))
+    monkeypatch.setattr(main, "transcriptions", SlidingWindow(1, HOUR_S))
+    _register(client)
+    _journey_data(client.post("/api/plan", json={"request": "Прогулка"}))
+    assert client.post("/api/transcribe", json={"audio": _wav()}).status_code == 200
+
+    _login(client, *ADMIN)  # from the same address, after it used up its runs
+
+    for _ in range(2):
+        _journey_data(client.post("/api/plan", json={"request": "Прогулка"}))
+        assert client.post("/api/transcribe", json={"audio": _wav()}).status_code == 200
+    assert main.limits.running == 0
+
+
 def test_an_empty_form_is_refused_before_it_uses_a_run(client, monkeypatch):
     monkeypatch.setattr(main, "limits", Limits(per_hour=1, daily_budget_usd=0, max_concurrent=0))
     _register(client)  # no home city in a fresh profile
@@ -378,7 +393,7 @@ def test_an_old_trip_opens_as_a_journey_after_the_upgrade(
 
         assert client.get("/app/trips/trip1").status_code == 200  # the old link
         detail = client.get("/api/journeys/trip1").json()
-        assert [d["trip_id"] for d in detail["journey"]["days"]] == ["trip1"]
+        assert [d["day_id"] for d in detail["journey"]["days"]] == ["trip1"]
         assert [h["day"] for h in detail["history"]] == [None, 0]
         data = _journey_data(_feedback(client, "trip1", exclude_place_ids=["osm:node/1"]))
         assert len(data["journey"]["days"][0]["plan"]["stops"]) == 1
@@ -581,7 +596,7 @@ def test_admin_pages_are_for_the_admin_only(client):
 
     stats = client.get("/api/admin/stats").json()
     assert (stats["users"], stats["journeys"], stats["journeys_today"]) == (3, 1, 1)
-    assert (stats["trips"], stats["trips_today"]) == (2, 2)  # the days: one route each
+    assert (stats["days"], stats["days_today"]) == (2, 2)  # one route each
     assert stats["llm_cost_today"] == stats["llm_cost_total"] == 0.01
     assert stats["limits"] == {
         "per_hour": 0,
@@ -590,7 +605,7 @@ def test_admin_pages_are_for_the_admin_only(client):
         "running": 0,
     }
     users = {u["email"]: u for u in client.get("/api/admin/users").json()}
-    assert (users["anna@example.com"]["journeys"], users["anna@example.com"]["trips"]) == (1, 2)
+    assert (users["anna@example.com"]["journeys"], users["anna@example.com"]["days"]) == (1, 2)
     assert users[ADMIN[0]]["is_admin"]
     [journey] = client.get("/api/admin/trips").json()
     assert (journey["id"], journey["owner_email"], journey["days"], journey["cost_usd"]) == (
@@ -616,16 +631,32 @@ def test_seeded_passwords_follow_the_env_across_restarts(tmp_path, monkeypatch, 
         assert _login(client, DEMO[0], "rotated-pass").status_code == 200
 
 
-def test_a_restart_restores_the_shared_demo_profile(tmp_path, monkeypatch, pipeline):
+def test_the_shared_demo_account_cannot_be_wiped_and_a_restart_resets_it(
+    tmp_path, monkeypatch, pipeline
+):
     _fresh_throttles(monkeypatch)
     monkeypatch.setattr(main, "settings", _settings(tmp_path))
+    monkeypatch.setattr(main, "limits", Limits(0, 0, 0))
+    monkeypatch.setattr(main, "busy_journeys", set())
     with TestClient(main.app) as client:
         _login(client, *DEMO)
-        assert client.put("/api/profile", json={"home_city": "Казань"}).status_code == 200
+        # Planning, feedback and memory work in it; deleting and the questionnaire do not.
+        journey_id = _journey_data(client.post("/api/plan", json=THREE_DAYS))["journey_id"]
+        assert _feedback(client, journey_id, feedback="без музеев").status_code == 200
+        facts = client.get("/api/memory").json()
+        assert facts
+        for refused in (
+            client.put("/api/profile", json={"home_city": "Казань"}),
+            client.delete(f"/api/memory/{facts[0]['id']}"),
+            client.delete(f"/api/journeys/{journey_id}"),
+        ):
+            assert refused.status_code == 403 and refused.json()["detail"] == main.DEMO_IS_SHARED
 
     with TestClient(main.app) as client:
         _login(client, *DEMO)
         assert client.get("/api/profile").json()["home_city"] == "Санкт-Петербург"
+        assert client.get("/api/memory").json() == []  # what visitors taught it is gone
+        assert [j["id"] for j in client.get("/api/journeys").json()] == [journey_id]
 
 
 def test_admin_rights_follow_the_env_across_restarts(tmp_path, monkeypatch, pipeline):

@@ -23,7 +23,7 @@ from app.models import (
     Stop,
     TripBrief,
 )
-from app.pipeline import Journey, TripRun
+from app.pipeline import DayRun, Journey
 from app.store import Store
 
 DAY = date(2026, 10, 24)
@@ -52,12 +52,12 @@ def _brief(day: date = DAY, date_to: date | None = None) -> TripBrief:
     )
 
 
-def _trip_run(
-    trip_id: str = "trip1",
+def _day_run(
+    day_id: str = "trip1",
     title: str | None = "Конструктивизм и кофе",
     day: date = DAY,
     first: int = 1,
-) -> TripRun:
+) -> DayRun:
     """One finished day: places first..first+2, the first two on the route, the third
     rejected by the traveller."""
     brief = _brief(day)
@@ -114,13 +114,13 @@ def _trip_run(
         geometry=[[59.93, 30.36], [59.931, 30.36]],
         title=title,
     )
-    return TripRun(id=trip_id, state=state, weather=weather, plan=plan)
+    return DayRun(id=day_id, state=state, weather=weather, plan=plan)
 
 
 def _journey(journey_id: str = "j1", days: int = 1, title: str = "Петербург") -> Journey:
     """What plan_journey returns: days with their own places, one shared registry."""
     runs = [
-        _trip_run(f"{journey_id}-{i}", day=DAY + timedelta(days=i), first=1 + 10 * i)
+        _day_run(f"{journey_id}-{i}", day=DAY + timedelta(days=i), first=1 + 10 * i)
         for i in range(days)
     ]
     registry = {pid: p for run in runs for pid, p in run.state.registry.items()}
@@ -146,11 +146,6 @@ def _journey(journey_id: str = "j1", days: int = 1, title: str = "Петербу
         days=runs,
         learned=[],
     )
-
-
-@pytest.fixture
-def make_trip_run() -> Callable[..., TripRun]:
-    return _trip_run
 
 
 @pytest.fixture
@@ -205,7 +200,7 @@ LEGACY_HISTORY = [
 def _legacy_database(path: Path, password_hash: str = "hash") -> None:
     """A database file with one user, one trip (id "trip1") saved as the old app saved
     it, and a memory fact learned on that trip."""
-    trip_run = _trip_run()
+    day = _day_run()
     with sqlite3.connect(path) as db:
         db.executescript(LEGACY_SCHEMA)
         db.execute(
@@ -219,9 +214,9 @@ def _legacy_database(path: Path, password_hash: str = "hash") -> None:
             " '2026-10-19 10:00:00.000000', '2026-10-19 10:05:00.000000')",
             (
                 json.dumps({"more": ["street_art"]}),
-                TypeAdapter(ResearchState).dump_json(trip_run.state).decode(),
-                TypeAdapter(list[HourWeather]).dump_json(trip_run.weather).decode(),
-                trip_run.plan.model_dump_json(),
+                TypeAdapter(ResearchState).dump_json(day.state).decode(),
+                TypeAdapter(list[HourWeather]).dump_json(day.weather).decode(),
+                day.plan.model_dump_json(),
                 json.dumps(LEGACY_HISTORY),
             ),
         )

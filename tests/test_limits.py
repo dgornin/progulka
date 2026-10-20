@@ -21,6 +21,17 @@ def test_rate_limit_is_per_client_and_slides(monkeypatch):
     assert limits.admit("a") is None
 
 
+def test_the_admins_runs_pass_every_limit_and_still_count():
+    limits = Limits(per_hour=1, daily_budget_usd=0.02, max_concurrent=1)
+    assert limits.admit("a") is None  # the address's one run takes the one slot
+    assert "слишком много" in limits.admit("b")
+
+    assert limits.admit("a", exempt=True) is None and limits.running == 2
+    limits.release(cost_usd=0.02)  # the admin's run spends the budget
+    assert limits.running == 1 and limits.admit("b") == limits_module.BUDGET_SPENT
+    assert limits.admit("a", exempt=True) is None
+
+
 def test_concurrency_slot_is_returned_on_release():
     limits = Limits(per_hour=0, daily_budget_usd=0, max_concurrent=1)
 

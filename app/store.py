@@ -29,10 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agent.memory import fact_key
 from app.agent.tools import ResearchState
-from app.db import FACT_COLUMN_CHARS, AuthSession, MemoryFact, Trip, User, utcnow
+from app.db import FACT_COLUMN_CHARS, AuthSession, MemoryFact, User, utcnow
+from app.db import Day as DayRow
 from app.db import Journey as JourneyRow
 from app.models import DayOutline, GeoPoint, HourWeather, Plan, TripBrief
-from app.pipeline import Journey, TripRun
+from app.pipeline import DayRun, Journey
 from app.profile import Profile, WalkPreferences
 
 # Old facts give way to new ones: the profile is the stable part, memory is recent.
@@ -69,7 +70,7 @@ class HistoryEntry(BaseModel):
 
 
 class DayView(BaseModel):
-    trip_id: str
+    day_id: str
     index: int
     date: date
     theme: str
@@ -117,7 +118,7 @@ class AdminUser(BaseModel):
     is_admin: bool
     created_at: datetime
     journeys: int
-    trips: int  # the days of those journeys: one route each
+    days: int  # the days of those journeys: one route each
     cost_usd: float
 
 
@@ -140,12 +141,12 @@ _OUTLINE = TypeAdapter(list[DayOutline])
 # needs none of it.
 _DAY_TOTALS = (
     select(
-        Trip.journey_id,
+        DayRow.journey_id,
         func.count().label("days"),
-        func.sum(Trip.stops).label("stops"),
-        func.round(func.sum(Trip.walk_km), 1).label("walk_km"),
+        func.sum(DayRow.stops).label("stops"),
+        func.round(func.sum(DayRow.walk_km), 1).label("walk_km"),
     )
-    .group_by(Trip.journey_id)
+    .group_by(DayRow.journey_id)
     .subquery()
 )
 
@@ -303,6 +304,10 @@ class Store:
             await s.execute(delete(MemoryFact).where(MemoryFact.id.in_(stale.scalar_subquery())))
         return added
 
+    async def forget_all(self, user_id: int) -> None:
+        async with self._db.begin() as s:
+            await s.execute(delete(MemoryFact).where(MemoryFact.user_id == user_id))
+
     async def delete_memory(self, user_id: int, fact_id: int) -> bool:
         async with self._db.begin() as s:
             result = await s.execute(
@@ -332,11 +337,14 @@ class Store:
         _record_journey(row, journey, entry)
         days = []
         for index, run in enumerate(journey.days):
-            day = Trip(id=run.id, user_id=user_id, journey_id=journey.id, day_index=index)
+            day = DayRow(id=run.id, user_id=user_id, journey_id=journey.id, day_index=index)
             _record_day(day, run)
             days.append(day)
         async with self._db.begin() as s:
             s.add(row)
+            # Inserted first: the days refer to it, and with no relationship() between the
+            # two the unit of work does not order the INSERTs by that foreign key.
+            await s.flush()
             s.add_all(days)
 
     async def update_journey(self, user_id: int, journey: Journey, entry: HistoryEntry) -> None:
@@ -347,7 +355,7 @@ class Store:
         async with self._db.begin() as s:
             row = await self._owned_journey(s, user_id, journey.id)
             day = await s.scalar(
-                select(Trip).where(Trip.journey_id == journey.id, Trip.day_index == entry.day)
+                select(DayRow).where(DayRow.journey_id == journey.id, DayRow.day_index == entry.day)
             )
             if row is None or day is None:
                 raise LookupError(f"day {entry.day} of journey {journey.id} of user {user_id}")
@@ -400,13 +408,13 @@ class Store:
             )
         return result.rowcount > 0
 
-    async def _load(self, user_id: int, journey_id: str) -> tuple[JourneyRow, list[Trip]] | None:
+    async def _load(self, user_id: int, journey_id: str) -> tuple[JourneyRow, list[DayRow]] | None:
         async with self._db() as s:
             row = await self._owned_journey(s, user_id, journey_id)
             if row is None:
                 return None
             days = await s.scalars(
-                select(Trip).where(Trip.journey_id == row.id).order_by(Trip.day_index)
+                select(DayRow).where(DayRow.journey_id == row.id).order_by(DayRow.day_index)
             )
             return row, list(days)
 
@@ -448,19 +456,19 @@ class Store:
                     ).select_from(JourneyRow)
                 )
             ).one()
-            trips, trips_today = (
+            days, days_today = (
                 await s.execute(
                     select(func.count(), new)
-                    .select_from(Trip)
-                    .join(JourneyRow, JourneyRow.id == Trip.journey_id)
+                    .select_from(DayRow)
+                    .join(JourneyRow, JourneyRow.id == DayRow.journey_id)
                 )
             ).one()
         return {
             "users": users or 0,
             "journeys": journeys,
             "journeys_today": journeys_today,
-            "trips": trips,
-            "trips_today": trips_today,
+            "days": days,
+            "days_today": days_today,
             "llm_cost_today": round(await self.llm_cost_since(since), 5),
             "llm_cost_total": round(cost_total, 5),
         }
@@ -475,17 +483,19 @@ class Store:
             .group_by(JourneyRow.user_id)
             .subquery()
         )
-        trips = select(Trip.user_id, func.count().label("trips")).group_by(Trip.user_id).subquery()
+        days = (
+            select(DayRow.user_id, func.count().label("days")).group_by(DayRow.user_id).subquery()
+        )
         async with self._db() as s:
             rows = await s.execute(
                 select(
                     User,
                     func.coalesce(journeys.c.journeys, 0),
-                    func.coalesce(trips.c.trips, 0),
+                    func.coalesce(days.c.days, 0),
                     func.coalesce(journeys.c.cost_usd, 0.0),
                 )
                 .outerjoin(journeys, journeys.c.user_id == User.id)
-                .outerjoin(trips, trips.c.user_id == User.id)
+                .outerjoin(days, days.c.user_id == User.id)
                 .order_by(User.id)
             )
             return [
@@ -496,10 +506,10 @@ class Store:
                     is_admin=user.is_admin,
                     created_at=user.created_at,
                     journeys=n_journeys,
-                    trips=n_trips,
+                    days=n_days,
                     cost_usd=round(cost, 5),
                 )
-                for user, n_journeys, n_trips, cost in rows
+                for user, n_journeys, n_days, cost in rows
             ]
 
     async def admin_journeys(self, limit: int = 50) -> list[AdminJourney]:
@@ -536,7 +546,7 @@ def journey_view(journey: Journey) -> JourneyView:
         outline=journey.outline,
         days=[
             DayView(
-                trip_id=run.id,
+                day_id=run.id,
                 index=day.index,
                 date=day.date,
                 theme=day.theme,
@@ -566,7 +576,7 @@ def _record_journey(row: JourneyRow, journey: Journey, entry: HistoryEntry) -> N
     row.updated_at = entry.at
 
 
-def _record_day(row: Trip, run: TripRun) -> None:
+def _record_day(row: DayRow, run: DayRun) -> None:
     plan = run.plan
     if plan is None:
         raise ValueError("only a day that has a route is saved")
@@ -585,9 +595,9 @@ def _saved_state(state: ResearchState, plan: Plan) -> dict[str, Any]:
     return _STATE.dump_python(replace(state, registry=registry), mode="json")
 
 
-def _journey(row: JourneyRow, days: list[Trip]) -> Journey:
+def _journey(row: JourneyRow, days: list[DayRow]) -> Journey:
     runs = [
-        TripRun(
+        DayRun(
             id=day.id,
             state=_STATE.validate_python(day.state),
             weather=_WEATHER.validate_python(day.weather),

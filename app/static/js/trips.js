@@ -9,8 +9,9 @@
  */
 
 import { api, requireUser } from "./api.js";
+import { rangeText } from "./calendar.js";
 import { renderNav } from "./nav.js";
-import { ago, confirmDialog, dateRange, h, plural, svg, toast } from "./ui.js";
+import { ago, confirmDialog, h, plural, svg, toast } from "./ui.js";
 
 const list = document.getElementById("trips");
 const count = document.getElementById("trips-count");
@@ -111,7 +112,7 @@ function journeyCard(journey) {
       h(
         "p",
         { class: "trip-dates" },
-        h("span", {}, dateRange(journey.date_from, journey.date_to)),
+        h("span", {}, rangeText(journey.date_from, journey.date_to)),
         h(
           "span",
           { class: "trip-days" },

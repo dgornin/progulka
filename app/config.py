@@ -37,7 +37,7 @@ class Settings:
     user_agent: str
     cache_dir: Path
     overpass_urls: tuple[str, ...]  # tried in order; the last one that answered is tried first
-    llm_replay: bool  # serve repeated LLM requests from the on-disk cache (demo insurance)
+    llm_replay: bool  # record LLM answers on disk and replay them (demo insurance)
     # Pins "today": the brief prompt and the dates it resolves depend on it, so without
     # the pin a run rehearsed yesterday does not replay from the cache.
     today: date | None

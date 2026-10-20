@@ -3,8 +3,8 @@
 A Place always comes from a source (OpenStreetMap, Wikipedia, Wikivoyage) and keeps
 its id and URL, so every stop in a plan can be traced back to where it was found.
 
-A trip (journey) is one to MAX_DAYS days in one city; each day is one walk with its
-own Plan, and DayOutline says what the day is about. A single walk is a one-day trip.
+A journey is one to MAX_DAYS days in one city; each day is one walk with its own
+Plan, and DayOutline says what the day is about. A single walk is a one-day journey.
 """
 
 from collections.abc import Awaitable, Callable
@@ -184,3 +184,10 @@ class AgentEvent(BaseModel):
 
 # How every layer reports progress: the pipeline and the agent call it, the API streams it.
 Emit = Callable[[AgentEvent], Awaitable[None]]
+
+
+def clip(text: str, limit: int) -> str:
+    """One line of at most `limit` characters, cut with an ellipsis: what a model or a
+    source wrote, fitted into a snippet, a reason or a title."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"

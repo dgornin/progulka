@@ -100,6 +100,9 @@ JOURNEY_NOT_FOUND = "Путешествие не найдено"
 DAY_NOT_FOUND = "В этом путешествии нет такого дня"
 JOURNEY_BUSY = "Путешествие уже перестраивается"
 TOO_MANY_ATTEMPTS = "Слишком много попыток, подождите несколько минут"
+DEMO_IS_SHARED = (
+    "Демо-аккаунт общий: в нём нельзя удалять и менять анкету. Заведите свой — это бесплатно"
+)
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 DEMO_PROFILE = Profile(
     home_city="Санкт-Петербург",
@@ -349,6 +352,7 @@ async def get_profile(user: UserDep, store: StoreDep) -> Profile:
 
 @app.put("/api/profile")
 async def put_profile(profile: Profile, user: UserDep, store: StoreDep) -> Profile:
+    _refuse_on_shared_demo(user)
     return await store.put_profile(user.id, profile)
 
 
@@ -359,6 +363,7 @@ async def memory(user: UserDep, store: StoreDep) -> list[MemoryOut]:
 
 @app.delete("/api/memory/{fact_id}", status_code=204)
 async def forget(fact_id: int, user: UserDep, store: StoreDep) -> Response:
+    _refuse_on_shared_demo(user)
     if not await store.delete_memory(user.id, fact_id):
         raise HTTPException(status_code=404, detail="Такого факта нет")
     return Response(status_code=204)
@@ -379,6 +384,7 @@ async def journey(journey_id: str, user: UserDep, store: StoreDep) -> JourneyDet
 
 @app.delete("/api/journeys/{journey_id}", status_code=204)
 async def delete_journey(journey_id: str, user: UserDep, store: StoreDep) -> Response:
+    _refuse_on_shared_demo(user)
     if journey_id in busy_journeys:
         raise HTTPException(status_code=409, detail=JOURNEY_BUSY)
     if not await store.delete_journey(user.id, journey_id):
@@ -392,19 +398,21 @@ class TranscribeRequest(BaseModel):
 
 @app.post("/api/transcribe")
 async def transcribe_speech(
-    body: TranscribeRequest, request: Request, _user: UserDep
+    body: TranscribeRequest, request: Request, user: UserDep
 ) -> dict[str, str]:
     """Voice input: a recording in, its transcript out, for the request or feedback box."""
     client = _client(request)
-    if transcriptions.full(client):
+    counted = not user.is_admin  # the admin is exempt, as from the run limits (limits.py)
+    if counted and transcriptions.full(client):
         raise HTTPException(
             status_code=429,
             detail=f"Не больше {TRANSCRIPTIONS_PER_HOUR} голосовых вводов в час с одного адреса",
         )
-    if limits.out_of_budget():
+    if counted and limits.out_of_budget():
         raise HTTPException(status_code=429, detail=BUDGET_SPENT)
     _check_recording(body.audio)
-    transcriptions.add(client)
+    if counted:
+        transcriptions.add(client)
     llm: LLM = request.app.state.llm.for_run()
     try:
         text, cost_usd = await transcribe(llm, body.audio)
@@ -499,7 +507,7 @@ async def plan(
         )
         return Outcome(journey, None, learned)
 
-    return _stream(job, request)
+    return _stream(job, request, user)
 
 
 @app.post("/api/journeys/{journey_id}/days/{index}/feedback")
@@ -549,10 +557,20 @@ async def feedback(
             )
             return Outcome(updated, reply, learned)
 
-        return _stream(job, request, journey_id=journey_id)
+        return _stream(job, request, user, journey_id=journey_id)
     except BaseException:
         busy_journeys.discard(journey_id)
         raise
+
+
+def _refuse_on_shared_demo(user: UserOut) -> None:
+    """The demo account's password is public: what one visitor deletes or writes into the
+    questionnaire (whose notes reach the agent's prompts), every later visitor gets.
+    Planning, feedback and the memory they teach still work in it, and a restart resets
+    its profile and memory (auth.seed_account)."""
+    demo = settings.demo_email.strip().lower() if settings.demo_password else ""
+    if demo and user.email == demo:
+        raise HTTPException(status_code=403, detail=DEMO_IS_SHARED)
 
 
 async def _traveller(store: Store, user_id: int) -> tuple[Profile, list[str]]:
@@ -572,9 +590,11 @@ def _client(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _stream(job: Job, request: Request, journey_id: str | None = None) -> StreamingResponse:
+def _stream(
+    job: Job, request: Request, user: UserOut, journey_id: str | None = None
+) -> StreamingResponse:
     """Start the run in the background and stream its events; it frees `journey_id` at the end."""
-    refusal = limits.admit(_client(request))
+    refusal = limits.admit(_client(request), exempt=user.is_admin)
     if refusal:
         raise HTTPException(status_code=429, detail=refusal)
     llm: LLM = request.app.state.llm.for_run()
