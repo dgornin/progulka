@@ -19,8 +19,8 @@ PASSWORD = "secret-123"
 class FakePipeline:
     """Stands in for plan_trip and apply_feedback: records its inputs, spends a cent."""
 
-    def __init__(self, make_session):
-        self.make_session = make_session
+    def __init__(self, make_trip_run):
+        self.make_trip_run = make_trip_run
         self.calls: list[dict] = []
         self.learned = ["Любит конструктивизм"]
         self.error: Exception | None = None
@@ -31,18 +31,20 @@ class FakePipeline:
         llm.usage.cost_usd += 0.01
         if self.error:
             raise self.error
-        session = self.make_session(trip_id=f"trip{len(self.calls)}")
-        session.learned = list(self.learned)
-        return session
+        trip_run = self.make_trip_run(trip_id=f"trip{len(self.calls)}")
+        trip_run.learned = list(self.learned)
+        return trip_run
 
-    async def apply_feedback(self, session, req, llm, emit, profile=None, memory=None):
-        self.calls.append({"session": session, "req": req, "memory": memory})
+    async def apply_feedback(self, trip_run, req, llm, emit, profile=None, memory=None):
+        self.calls.append({"trip_run": trip_run, "req": req, "memory": memory})
         llm.usage.cost_usd += 0.002
-        plan = session.plan
+        plan = trip_run.plan
         plan.stops = [s for s in plan.stops if s.place.id not in req.exclude_place_ids]
         plan.title = "Без лишнего"
-        session.learned = ["Не любит толпы"]
-        return session, "Убрал"
+        if self.error:
+            raise self.error  # after changing the loaded state, as a real failure can
+        trip_run.learned = ["Не любит толпы"]
+        return trip_run, "Убрал"
 
 
 def _settings(tmp_path, **changes):
@@ -62,16 +64,17 @@ def _settings(tmp_path, **changes):
 
 
 @pytest.fixture
-def pipeline(make_session, monkeypatch):
-    fake = FakePipeline(make_session)
+def pipeline(make_trip_run, monkeypatch):
+    fake = FakePipeline(make_trip_run)
     monkeypatch.setattr(main, "plan_trip", fake.plan_trip)
     monkeypatch.setattr(main, "apply_feedback", fake.apply_feedback)
     return fake
 
 
-def _fresh_throttles(monkeypatch, registrations=None):
+def _fresh_throttles(monkeypatch, registrations=None, logins=None):
     window = main.AUTH_WINDOW_S
     monkeypatch.setattr(main, "login_failures", SlidingWindow(main.LOGIN_FAILURES, window))
+    monkeypatch.setattr(main, "logins", SlidingWindow(logins or main.LOGINS, window))
     monkeypatch.setattr(
         main, "registrations", SlidingWindow(registrations or main.REGISTRATIONS, window)
     )
@@ -148,7 +151,7 @@ def test_traveller_plans_continues_and_deletes_a_trip(client, pipeline):
         ["Не любит толпы"],
     )
     # Feedback continued the saved research state, with the memory as context.
-    assert pipeline.calls[1]["session"].state.excluded == {"osm:node/3"}
+    assert pipeline.calls[1]["trip_run"].state.excluded == {"osm:node/3"}
     assert pipeline.calls[1]["memory"] == ["Любит конструктивизм"]
 
     detail = client.get("/api/trips/trip1").json()
@@ -188,6 +191,19 @@ def test_a_failed_run_saves_nothing(client, pipeline):
     assert client.get("/api/trips").json() == []
 
 
+def test_a_failed_feedback_leaves_the_saved_trip_as_it_was(client, pipeline):
+    _register(client)
+    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+    saved = client.get("/api/trips/trip1").json()
+    pipeline.error = PipelineError("Не удалось собрать маршрут")
+
+    feedback = {"exclude_place_ids": ["osm:node/1"]}
+    events = _events(client.post("/api/trips/trip1/feedback", json=feedback))
+
+    assert [e["type"] for e in events] == ["error", "done"]
+    assert client.get("/api/trips/trip1").json() == saved
+
+
 def test_someone_elses_trip_and_memory_look_missing(client):
     _register(client)
     _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
@@ -216,6 +232,20 @@ def test_a_trip_being_rebuilt_refuses_feedback_and_delete(client):
     assert client.delete("/api/trips/trip1").status_code == 409
 
 
+def test_removing_a_stop_that_is_already_gone_uses_no_run(client, pipeline, monkeypatch):
+    monkeypatch.setattr(main, "limits", Limits(per_hour=2, daily_budget_usd=0, max_concurrent=0))
+    _register(client)
+    _plan_data(client.post("/api/plan", json={"request": "Прогулка"}))
+
+    # As from a second tab, where the stop was removed by an earlier run.
+    stale = client.post("/api/trips/trip1/feedback", json={"exclude_place_ids": ["osm:node/9"]})
+
+    assert stale.status_code == 409
+    assert stale.json() == {"detail": "Этого места уже нет в маршруте"}
+    assert len(pipeline.calls) == 1 and main.busy_trips == set()
+    _plan_data(client.post("/api/trips/trip1/feedback", json={"feedback": "без соборов"}))
+
+
 def test_runs_are_rate_limited_per_address(client, monkeypatch):
     monkeypatch.setattr(main, "limits", Limits(per_hour=1, daily_budget_usd=0, max_concurrent=0))
     _register(client)
@@ -237,6 +267,16 @@ def test_an_empty_form_is_refused_before_it_uses_a_run(client, monkeypatch):
     _plan_data(client.post("/api/plan", json={"request": "", "city": "Казань"}))
 
     assert empty.status_code == 422 and "укажите город" in empty.json()["detail"]
+
+
+def test_a_window_that_ends_before_it_starts_is_one_russian_sentence(client):
+    _register(client)
+    window = {"city": "Казань", "start_time": "12:00", "end_time": "11:00"}
+
+    response = client.post("/api/plan", json=window)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Конец прогулки должен быть позже начала"
 
 
 @pytest.mark.parametrize(
@@ -279,6 +319,14 @@ def test_wrong_password_and_login_throttle(client):
         assert _login(client, "anna@example.com", "not-my-password").status_code == 401
 
     assert _login(client, "anna@example.com", PASSWORD).status_code == 429
+
+
+def test_successful_logins_have_a_cap_of_their_own(client, monkeypatch):
+    _fresh_throttles(monkeypatch, logins=2)
+    for _ in range(2):
+        assert _login(client, *DEMO).status_code == 200
+
+    assert _login(client, *DEMO).status_code == 429
 
 
 def test_a_wave_of_sign_ups_does_not_lock_out_logins(client, monkeypatch):
@@ -387,6 +435,18 @@ def test_seeded_passwords_follow_the_env_across_restarts(tmp_path, monkeypatch, 
         assert _login(client, DEMO[0], "rotated-pass").status_code == 200
 
 
+def test_a_restart_restores_the_shared_demo_profile(tmp_path, monkeypatch, pipeline):
+    _fresh_throttles(monkeypatch)
+    monkeypatch.setattr(main, "settings", _settings(tmp_path))
+    with TestClient(main.app) as client:
+        _login(client, *DEMO)
+        assert client.put("/api/profile", json={"home_city": "Казань"}).status_code == 200
+
+    with TestClient(main.app) as client:
+        _login(client, *DEMO)
+        assert client.get("/api/profile").json()["home_city"] == "Санкт-Петербург"
+
+
 def test_admin_rights_follow_the_env_across_restarts(tmp_path, monkeypatch, pipeline):
     _fresh_throttles(monkeypatch)
     monkeypatch.setattr(main, "settings", _settings(tmp_path))
@@ -420,7 +480,7 @@ def test_feedback_continues_a_trip_saved_before_a_restart(tmp_path, monkeypatch,
         feedback = client.post("/api/trips/trip1/feedback", json={"feedback": "без соборов"})
 
         assert _plan_data(feedback)["reply"] == "Убрал"
-        restored = pipeline.calls[1]["session"]
+        restored = pipeline.calls[1]["trip_run"]
         assert restored.state.excluded == {"osm:node/3"} and len(restored.state.registry) == 3
         history = client.get("/api/trips/trip1").json()["history"]
         assert [h["text"] for h in history] == ["Прогулка", "без соборов"]

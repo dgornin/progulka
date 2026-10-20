@@ -102,7 +102,11 @@ async def parse_brief(
         fixed.end_time or draft.end_time or _add_hours(start, draft.duration_hours or DEFAULT_HOURS)
     )
     if end <= start:
-        end = _add_hours(start, DEFAULT_HOURS)
+        if fixed.end_time and not fixed.start_time:
+            # The end set in the form outranks a start from the text or the default.
+            start = _add_hours(end, -DEFAULT_HOURS)
+        else:
+            end = _add_hours(start, DEFAULT_HOURS)
 
     return TripBrief(
         city=city,
@@ -136,11 +140,13 @@ def _first[T](*values: T | None) -> T | None:
     return next((v for v in values if v is not None), None)
 
 
-def _add_hours(start: dt.time, hours: float) -> dt.time:
-    """start + hours, capped at the end of the same day (a walk does not cross midnight)."""
-    base = dt.datetime.combine(dt.date(2000, 1, 1), start)
-    end = base + dt.timedelta(hours=hours)
-    return end.time() if end.date() == base.date() else LATEST_END
+def _add_hours(t: dt.time, hours: float) -> dt.time:
+    """t + hours, kept within the same day (a walk does not cross midnight)."""
+    base = dt.datetime.combine(dt.date(2000, 1, 1), t)
+    moved = base + dt.timedelta(hours=hours)
+    if moved.date() == base.date():
+        return moved.time()
+    return LATEST_END if hours > 0 else dt.time(0, 0)
 
 
 def _detect_language(text: str) -> Literal["ru", "en"]:

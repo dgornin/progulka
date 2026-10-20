@@ -1,4 +1,4 @@
-"""Shared fixtures of the persistence tests: a fresh SQLite store and a finished session."""
+"""Shared fixtures of the persistence tests: a fresh SQLite store and a finished trip run."""
 
 from collections.abc import AsyncIterator, Callable
 from datetime import date, datetime, time
@@ -8,7 +8,7 @@ import pytest
 from app.agent.tools import ResearchState
 from app.db import connect, create_schema
 from app.models import Candidate, GeoPoint, HourWeather, Interest, Place, Plan, Stop, TripBrief
-from app.pipeline import Session
+from app.pipeline import TripRun
 from app.store import Store
 
 DAY = date(2026, 10, 24)
@@ -22,7 +22,7 @@ async def store(tmp_path) -> AsyncIterator[Store]:
     await engine.dispose()
 
 
-def _session(trip_id: str = "trip1", title: str | None = "Конструктивизм и кофе") -> Session:
+def _trip_run(trip_id: str = "trip1", title: str | None = "Конструктивизм и кофе") -> TripRun:
     """What the pipeline returns after a run: state with all three collections, a plan."""
     brief = TripBrief(
         city="Санкт-Петербург",
@@ -84,9 +84,9 @@ def _session(trip_id: str = "trip1", title: str | None = "Конструктив
         geometry=[[59.93, 30.36], [59.931, 30.36]],
         title=title,
     )
-    return Session(id=trip_id, state=state, weather=weather, plan=plan)
+    return TripRun(id=trip_id, state=state, weather=weather, plan=plan)
 
 
 @pytest.fixture
-def make_session() -> Callable[..., Session]:
-    return _session
+def make_trip_run() -> Callable[..., TripRun]:
+    return _trip_run

@@ -25,6 +25,7 @@ const HOME = { center: [34, 57.5], zoom: 3.6 }; // European Russia, before a cit
 const ROUTE = "#c8412a";
 const DRAW_MS = 1500;
 const FIT_DELAY_MS = 350; // one re-framing for a turn that shortlists ten places at once
+const IMPORT_TIMEOUT_MS = 12000; // slow venue Wi-Fi still makes it in time
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -137,10 +138,15 @@ function lengths(path) {
  * Create the map in `container`. `hooks` supply the content, the map only places it:
  *   popup(stop, index) -> Node, startPopup(plan) -> Node, ghostTitle(placeId) -> string,
  *   onHover(placeId, on), onSelect(placeId).
- * Throws when the library cannot be loaded or WebGL is unavailable.
+ * Throws when the library cannot be loaded or WebGL is unavailable. A stalled CDN
+ * neither loads nor fails, so it counts as failed after IMPORT_TIMEOUT_MS: the planner
+ * waits for the map before it enables its button.
  */
 export async function createRouteMap(container, hooks) {
-  const lib = await import("maplibre-gl");
+  const stalled = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("библиотека карты не ответила вовремя")), IMPORT_TIMEOUT_MS);
+  });
+  const lib = await Promise.race([import("maplibre-gl"), stalled]);
   return new RouteMap(lib, container, hooks);
 }
 

@@ -407,6 +407,9 @@ async def test_finish_is_rejected_while_a_must_include_place_is_missing() -> Non
 
 # --- research loop -------------------------------------------------------------------
 
+# The loop's budgets are the caller's to set; these are generous enough for every script.
+BUDGET = {"max_steps": 14, "time_budget_s": 60.0}
+
 
 async def test_loop_runs_tools_answers_every_call_id_and_finishes() -> None:
     searches = [
@@ -426,7 +429,7 @@ async def test_loop_runs_tools_answers_every_call_id_and_finishes() -> None:
     )
     events = Recorder()
 
-    result = await research(llm, make_state(), events)
+    result = await research(llm, make_state(), events, **BUDGET)
 
     assert (result.stop_reason, result.steps, len(result.candidates)) == ("finished", 2, 4)
     assistant, *tool_messages = llm.seen[1][-3:]
@@ -449,7 +452,7 @@ async def test_loop_runs_tools_answers_every_call_id_and_finishes() -> None:
 async def test_loop_stops_at_max_steps_and_warns_before() -> None:
     searches = [call("search_osm", categories=["museum"], radius_m=r) for r in (500, 1000, 1500)]
     llm = FakeLLM([turn(c) for c in searches])
-    result = await research(llm, make_state(), Recorder(), max_steps=3)
+    result = await research(llm, make_state(), Recorder(), max_steps=3, time_budget_s=60.0)
     assert (result.stop_reason, result.steps) == ("max_steps", 3)
     assert llm.seen[1][-1] == {"role": "user", "content": BUDGET_WARNING}
 
@@ -462,7 +465,7 @@ async def test_loop_refuses_a_repeated_call_and_stops_on_the_third(sources: list
             turn(call("search_osm", categories=["museum"], radius_m=1000)),
         ]
     )
-    result = await research(llm, make_state(), Recorder())
+    result = await research(llm, make_state(), Recorder(), **BUDGET)
     assert (result.stop_reason, result.steps) == ("repeated_action", 3)
     assert "already called" in llm.seen[2][-1]["content"]
     assert sources == [("osm", ("museum",), 1000)]
@@ -470,7 +473,7 @@ async def test_loop_refuses_a_repeated_call_and_stops_on_the_third(sources: list
 
 async def test_loop_nudges_once_then_stops_without_tool_calls() -> None:
     llm = FakeLLM([turn(content="Думаю, что делать."), turn(content="Готово.")])
-    result = await research(llm, make_state(), Recorder())
+    result = await research(llm, make_state(), Recorder(), **BUDGET)
     assert (result.stop_reason, result.steps) == ("no_tool_calls", 2)
     assert llm.seen[1][-1] == {"role": "user", "content": NUDGE}
 
@@ -480,7 +483,7 @@ async def test_loop_stops_on_the_time_budget() -> None:
         async def chat(self, messages, tools=None, **_):
             await asyncio.sleep(5)
 
-    result = await research(SlowLLM(), make_state(), Recorder(), time_budget_s=0.05)
+    result = await research(SlowLLM(), make_state(), Recorder(), max_steps=14, time_budget_s=0.05)
     assert (result.stop_reason, result.steps) == ("time_budget", 1)
 
 
@@ -488,12 +491,12 @@ async def test_llm_failure_keeps_a_non_empty_shortlist_and_propagates_otherwise(
     failure = LLMError("rate limited", 429)
     search = call("search_osm", categories=["museum"])
     llm = FakeLLM([turn(search), turn(shortlist_call(MUSEUM)), failure])
-    result = await research(llm, make_state(), Recorder())
+    result = await research(llm, make_state(), Recorder(), **BUDGET)
     assert result.stop_reason == "llm_error"
     assert [c.place.id for c in result.candidates] == [MUSEUM.id]
 
     with pytest.raises(LLMError):
-        await research(FakeLLM([failure]), make_state(), Recorder())
+        await research(FakeLLM([failure]), make_state(), Recorder(), **BUDGET)
 
 
 # --- brief ---------------------------------------------------------------------------
@@ -520,8 +523,23 @@ async def test_brief_overrides_win_and_an_empty_window_is_fixed() -> None:
     llm = FakeLLM(structured=[draft])
     brief = await parse_brief(llm, "street art walk", date(2026, 10, 19), overrides)
     assert (brief.city, brief.date, brief.language) == ("Казань", date(2026, 10, 25), "en")
-    assert (brief.start_time, brief.end_time) == (time(18), time(23))  # 11:00 <= 18:00 -> +5 h
+    # The form's 11:00 outranks the text's 18:00: the walk moves to the five hours before it.
+    assert (brief.start_time, brief.end_time) == (time(6), time(11))
     assert brief.interests == [Interest(label="street art", weight=1.0)]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "window"),
+    [
+        ({"end_time": "09:00"}, (time(4), time(9))),  # before the default 10:00 start
+        ({"end_time": "03:00"}, (time(0), time(3))),  # not before midnight
+        ({"start_time": "16:00", "end_time": "12:00"}, (time(16), time(21))),
+        ({"start_time": "23:59"}, (time(23, 59), time(23, 59))),  # plan_trip refuses it
+    ],
+)
+async def test_brief_window_keeps_the_forms_end_time(overrides, window) -> None:
+    brief = await parse_brief(FakeLLM(), "", date(2026, 10, 19), {"city": "Казань", **overrides})
+    assert (brief.start_time, brief.end_time) == window
 
 
 async def test_brief_without_a_city_is_an_error() -> None:

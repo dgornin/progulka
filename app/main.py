@@ -23,7 +23,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -51,11 +51,13 @@ from app.limits import Limits, SlidingWindow
 from app.llm import LLM, LLMError
 from app.models import AgentEvent, Emit
 from app.pipeline import (
+    EMPTY_REQUEST,
     FeedbackRequest,
     PipelineError,
     PlanRequest,
-    Session,
+    TripRun,
     apply_feedback,
+    has_place,
     plan_trip,
 )
 from app.profile import Profile, catalog
@@ -76,7 +78,10 @@ log = logging.getLogger("progulka")
 STATIC = Path(__file__).parent / "static"
 
 MEMORY_IN_CONTEXT = 20  # newest facts the agent sees; older ones stay in the profile page
-LOGIN_FAILURES, REGISTRATIONS, AUTH_WINDOW_S = 10, 20, 300.0  # per address
+# "Today" for the brief is Moscow's date, not the server's (UTC in Docker): between
+# 00:00 and 03:00 MSK the server still says yesterday. No DST, so a fixed offset.
+MOSCOW = timezone(timedelta(hours=3))
+LOGIN_FAILURES, LOGINS, REGISTRATIONS, AUTH_WINDOW_S = 10, 100, 20, 300.0  # per address
 NO_REQUEST_TEXT = "По анкете и настройкам прогулки"
 TRIP_NOT_FOUND = "Маршрут не найден"
 TRIP_BUSY = "Маршрут уже перестраивается"
@@ -93,8 +98,10 @@ limits = Limits(
 )
 # Password guessing and mass sign-ups (each costs a scrypt hash), counted apart: a
 # classroom behind one NAT signing up at once must not lock everyone there out of
-# logging in, the demo account included.
+# logging in, the demo account included. Logins of either outcome have a cap of their
+# own, far above a classroom's, so a script cannot spend the CPU on correct passwords.
 login_failures = SlidingWindow(LOGIN_FAILURES, AUTH_WINDOW_S)
+logins = SlidingWindow(LOGINS, AUTH_WINDOW_S)
 registrations = SlidingWindow(REGISTRATIONS, AUTH_WINDOW_S)
 # Trips with a run in progress. A second feedback or a delete is refused, not queued:
 # a plain set, not per-trip locks, because nothing ever waits for a trip.
@@ -288,11 +295,12 @@ async def login(
     form: LoginForm, request: Request, response: Response, store: StoreDep
 ) -> dict[str, UserOut]:
     client = _client(request)
-    if login_failures.full(client):
+    if login_failures.full(client) or logins.full(client):
         raise HTTPException(status_code=429, detail=TOO_MANY_ATTEMPTS)
     # Counted as a failure until the password checks out: parallel guesses are all
     # still hashing when the next one arrives, and must not all pass the check above.
     login_failures.add(client)
+    logins.add(client)
     user = await authenticate(store, form.email, form.password)
     if user is None:
         raise HTTPException(status_code=401, detail="Неверная почта или пароль")
@@ -391,7 +399,7 @@ async def admin_trips(_admin: AdminDep, store: StoreDep) -> list[AdminTrip]:
 
 @dataclass
 class Outcome:
-    session: Session
+    trip_run: TripRun
     reply: str | None
     learned: list[str]  # facts that were new to the traveller's memory
 
@@ -405,18 +413,18 @@ async def plan(
 ) -> StreamingResponse:
     profile, facts = await _traveller(store, user.id)
     # Refused here, not inside the stream: an empty form must not use up an hourly run.
-    if not (req.request.strip() or req.city or (profile and profile.home_city)):
-        raise HTTPException(status_code=422, detail="Опишите прогулку или укажите город")
+    if not has_place(req, profile):
+        raise HTTPException(status_code=422, detail=EMPTY_REQUEST)
 
     async def job(llm: LLM, emit: Emit) -> Outcome:
-        today = settings.today or date.today()
-        session = await plan_trip(req, llm, emit, today=today, profile=profile, memory=facts)
+        today = settings.today or datetime.now(MOSCOW).date()
+        trip_run = await plan_trip(req, llm, emit, today=today, profile=profile, memory=facts)
         entry = HistoryEntry(
             kind="plan", text=req.request or NO_REQUEST_TEXT, cost_usd=llm.usage.cost_usd
         )
-        await store.create_trip(user.id, session, req.request, req.preferences, entry)
-        learned = await store.add_memory(user.id, session.learned, source_trip_id=session.id)
-        return Outcome(session, None, learned)
+        await store.create_trip(user.id, trip_run, req.request, req.preferences, entry)
+        learned = await store.add_memory(user.id, trip_run.learned, source_trip_id=trip_run.id)
+        return Outcome(trip_run, None, learned)
 
     return _stream(job, request)
 
@@ -434,15 +442,22 @@ async def feedback(
     try:
         # From the database, not process memory: a trip from last week, or from before a
         # restart, is continued exactly where its last run stopped.
-        session = await store.load_session(user.id, trip_id)
-        if session is None:
+        trip_run = await store.load_trip_run(user.id, trip_id)
+        if trip_run is None:
             raise HTTPException(status_code=404, detail=TRIP_NOT_FOUND)
+        # «Убрать» from a stale tab, for a stop an earlier run already removed: nothing
+        # to do, and refused before it uses up a run.
+        stops = trip_run.plan.stops if trip_run.plan else []
+        if not req.feedback.strip() and not any(
+            stop.place.id in req.exclude_place_ids for stop in stops
+        ):
+            raise HTTPException(status_code=409, detail="Этого места уже нет в маршруте")
         profile, facts = await _traveller(store, user.id)
-        text = _feedback_text(req, session)
+        text = _feedback_text(req, trip_run)
 
         async def job(llm: LLM, emit: Emit) -> Outcome:
             updated, reply = await apply_feedback(
-                session, req, llm, emit, profile=profile, memory=facts
+                trip_run, req, llm, emit, profile=profile, memory=facts
             )
             entry = HistoryEntry(
                 kind="feedback", text=text, reply=reply, cost_usd=llm.usage.cost_usd
@@ -461,13 +476,13 @@ async def _traveller(store: Store, user_id: int) -> tuple[Profile, list[str]]:
     return await store.get_profile(user_id), await store.memory_texts(user_id, MEMORY_IN_CONTEXT)
 
 
-def _feedback_text(req: FeedbackRequest, session: Session) -> str:
+def _feedback_text(req: FeedbackRequest, trip_run: TripRun) -> str:
     """The history line of a feedback run; the «Убрать» button sends no text, only ids."""
     if text := req.feedback.strip():
         return text
-    stops = session.plan.stops if session.plan else []
+    stops = trip_run.plan.stops if trip_run.plan else []
     names = [stop.place.name for stop in stops if stop.place.id in req.exclude_place_ids]
-    return "Убрать: " + ", ".join(names) if names else "Убрать места"
+    return "Убрать: " + ", ".join(names)
 
 
 def _client(request: Request) -> str:
@@ -490,9 +505,9 @@ def _stream(job: Job, request: Request, trip_id: str | None = None) -> Streaming
         started = time.monotonic()
         try:
             outcome = await job(llm, emit)
-            plan = outcome.session.plan
+            plan = outcome.trip_run.plan
             data: dict[str, Any] = {
-                "trip_id": outcome.session.id,
+                "trip_id": outcome.trip_run.id,
                 "plan": plan.model_dump(mode="json") if plan else None,
                 "usage": llm.usage.as_dict(),
                 "reply": outcome.reply,

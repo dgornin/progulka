@@ -15,8 +15,8 @@ Interests and the avoid list are merged here, layer by layer in the same order. 
 layer only adds to what the layers above decided: it cannot avoid what a higher
 layer asked for, nor ask for what a higher layer (or itself) avoids. So «меньше
 музеев» in the panel beats «хочу в музей» in the text, and «бары» in the text
-beats «не предлагать бары» in the profile. The second case matters: the validator
-treats every stop matching an avoid phrase as an error.
+beats «не предлагать бары» in the profile. The second case matters: no place that
+matches an avoid phrase gets into the route.
 
 Conflicts are judged by the kinds of places the validator would reject. A higher
 layer gets all it asked for: its interest overrules a lower avoid phrase that would
@@ -33,19 +33,15 @@ most important ones are added, discounted (× 0.7) so the request's own wishes r
 first, up to four in total. A rich request is not diluted by the questionnaire.
 """
 
-import re
 from typing import Any
 
 from app.models import Interest, InterestSource, TripBrief
-from app.planning.validator import AVOID_RULES
+from app.planning.validator import named_kinds
 from app.profile import INTERESTS, LOVE, PACES, Profile, WalkPreferences
 
 PROFILE_FILL_BELOW = 3
 MAX_INTERESTS_WITH_PROFILE = 4
 PROFILE_DISCOUNT = 0.7
-# A word belongs to an avoid rule when it is the rule's stem plus a short ending:
-# "бары", "музеев", "парки", but not "барокко" or "парковка".
-STEM_ENDING = 3
 SOURCE_ORDER: dict[InterestSource, int] = {"request": 0, "walk": 1, "profile": 2}
 
 
@@ -173,25 +169,15 @@ def _add_layer(
 def _overrules(label: str, phrase: str) -> bool:
     """A higher interest beats a lower avoid phrase that would reject any place serving
     it: «Рынки и магазины» in the panel beats «магазины» on the profile's avoid list."""
-    return label.casefold() == phrase.casefold() or bool(_kinds(label) & _kinds(phrase))
+    return label.casefold() == phrase.casefold() or bool(named_kinds(label) & named_kinds(phrase))
 
 
 def _rules_out(phrase: str, label: str) -> bool:
     """The avoid phrase leaves the interest nothing: the validator rejects every kind of
     place that serves it. «без музеев» rules out «Музеи и галереи», «без галерей» does not
     rule out «музеи». An interest with no known kind is ruled out only by its own name."""
-    kinds = _kinds(label)
-    return label.casefold() == phrase.casefold() or bool(kinds) and kinds <= _kinds(phrase)
-
-
-def _kinds(text: str) -> set[str]:
-    words = re.findall(r"\w+", text.casefold())
-    return {
-        kind
-        for kinds, stems in AVOID_RULES
-        if any(w.startswith(s) and len(w) - len(s) <= STEM_ENDING for w in words for s in stems)
-        for kind in kinds
-    }
+    kinds = named_kinds(label)
+    return label.casefold() == phrase.casefold() or bool(kinds) and kinds <= named_kinds(phrase)
 
 
 def _profile_notes(profile: Profile | None) -> list[str]:

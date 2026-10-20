@@ -24,8 +24,9 @@ HOURS_MATTER = (
     | {"shop", "bookshop", "market"}
 )
 
-# Kinds excluded by common "avoid" phrases (ru/en), found by word stems:
-# a word of the phrase matches when it starts with a stem ("без музеев" -> "музе").
+# Kinds excluded by common "avoid" phrases (ru/en), found by word stems: a word of
+# the phrase matches when it is a stem plus at most STEM_ENDING letters ("без музеев"
+# -> "музе"), so "бары" and "парки" match, but "барокко" and "парковка" do not.
 # A place of another kind still matches when a word of its name is a long stem plus
 # an ending: Wikipedia ("landmark") and Wikivoyage ("sight") kinds do not say that
 # "Русский музей" is a museum. Short stems ("бар", "пив") would hit "Дом Баранова".
@@ -33,17 +34,21 @@ AVOID_RULES: list[tuple[set[str], tuple[str, ...]]] = [
     ({"museum", "gallery"}, ("музе", "museum")),
     ({"gallery"}, ("галере", "galler")),
     ({"church"}, ("церк", "храм", "собор", "church", "cathedral")),
-    ({"bar", "pub"}, ("бар", "паб", "алкогол", "пив", "bar", "pub", "alcohol", "beer")),
+    (
+        {"bar", "pub"},
+        ("бар", "паб", "алкогол", "алкогольн", "пив", "пивнуш", "bar", "pub", "alcohol", "beer"),
+    ),
     ({"cafe", "bakery"}, ("кафе", "кофе", "cafe", "coffee")),
-    ({"restaurant", "food"}, ("ресторан", "restaurant")),
+    ({"restaurant", "food"}, ("ресторан", "ресторанч", "restaurant")),
     ({"street_food"}, ("фастфуд", "стритфуд", "fast")),
     ({"theatre"}, ("театр", "theat")),
-    ({"cinema"}, ("кино", "cinema")),
+    ({"cinema"}, ("кино", "кинотеатр", "cinema")),
     ({"park", "garden"}, ("парк", "park")),
-    ({"shop"}, ("магазин", "шопинг", "shop")),
+    ({"shop"}, ("магазин", "магазинч", "шопинг", "shop", "shopping")),
     ({"market"}, ("рын", "market")),
     ({"monument", "memorial"}, ("памятник", "мемориал", "monument", "memorial")),
 ]
+STEM_ENDING = 3
 NAME_STEM_MIN = 4
 
 MESSAGES = {
@@ -152,7 +157,7 @@ def _route_violations(plan: Plan, text: dict[str, str]) -> list[Violation]:
 
 def matches_avoid(avoid: str, kind: str, name: str) -> bool:
     """The phrase excludes the place: by its kind, by a word of its name (a long stem
-    plus at most three letters), or the phrase is part of the name.
+    plus at most STEM_ENDING letters), or the phrase is part of the name.
 
     Names are matched by whole words: "кафе" is not in "Кафедральный собор", "pub" is
     not in "Public Library". A false match is an error that makes the agent drop a
@@ -161,15 +166,21 @@ def matches_avoid(avoid: str, kind: str, name: str) -> bool:
     phrase = avoid.strip().lower()
     if len(phrase) >= 3 and re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", name.lower()):
         return True
-    words = _words(phrase)
     name_words = _words(name)
-    for kinds, stems in AVOID_RULES:
-        if not any(w.startswith(stems) for w in words):
-            continue
+    for kinds, stems in _rules_named(phrase):
         long_stems = [s for s in stems if len(s) >= NAME_STEM_MIN]
-        if kind in kinds or any(_inflects(w, s, 3) for w in name_words for s in long_stems):
+        if kind in kinds or any(
+            _inflects(w, s, STEM_ENDING) for w in name_words for s in long_stems
+        ):
             return True
     return False
+
+
+def named_kinds(text: str) -> set[str]:
+    """The kinds of places the words of `text` name: «без музеев» -> museum, gallery.
+    Shared with the brief's merge (app/personalization.py), so that it judges conflicts
+    exactly as this validator does."""
+    return {kind for kinds, _ in _rules_named(text) for kind in kinds}
 
 
 def names_place(wanted: str, name: str) -> bool:
@@ -180,6 +191,15 @@ def names_place(wanted: str, name: str) -> bool:
     """
     words, have = _words(wanted), _words(name)
     return bool(words) and all(any(_inflects(h, w, 2) for h in have) for w in words)
+
+
+def _rules_named(text: str) -> list[tuple[set[str], tuple[str, ...]]]:
+    words = _words(text)
+    return [
+        (kinds, stems)
+        for kinds, stems in AVOID_RULES
+        if any(_inflects(w, s, STEM_ENDING) for w in words for s in stems)
+    ]
 
 
 def _inflects(word: str, stem: str, ending: int) -> bool:

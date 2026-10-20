@@ -5,7 +5,7 @@ pipeline objects, so a route handler never touches a database session. Every met
 opens its own short transaction, which also makes the store usable from the
 background task that keeps running an agent after the request handler has returned.
 
-A trip is a pipeline Session at rest: ResearchState (a dataclass of pydantic models)
+A trip is a pipeline TripRun at rest: ResearchState (a dataclass of pydantic models)
 and the hourly weather go through pydantic TypeAdapters to JSON and back, so feedback
 on a saved trip continues exactly where the last run stopped, restart or not.
 """
@@ -19,15 +19,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import load_only
 
+from app.agent.memory import fact_key
 from app.agent.tools import ResearchState
-from app.db import AuthSession, MemoryFact, Trip, User, utcnow
+from app.db import FACT_COLUMN_CHARS, AuthSession, MemoryFact, Trip, User, utcnow
 from app.models import HourWeather, Plan
-from app.pipeline import Session
+from app.pipeline import TripRun
 from app.profile import Profile, WalkPreferences
 
 # Old facts give way to new ones: the profile is the stable part, memory is recent.
 MAX_MEMORY_FACTS = 50
-MAX_FACT_CHARS = 300
 
 
 class UserOut(BaseModel):
@@ -119,10 +119,6 @@ def _email(email: str) -> str:
     return email.strip().lower()
 
 
-def _same_fact(text: str) -> str:
-    return " ".join(text.split()).casefold()
-
-
 def today_start() -> datetime:
     return datetime.combine(utcnow().date(), time(), tzinfo=UTC)
 
@@ -130,7 +126,7 @@ def today_start() -> datetime:
 class Store:
     def __init__(self, engine: AsyncEngine):
         # Rows are read after their transaction commits: nothing may lazy-load later.
-        self._sessions = async_sessionmaker(engine, expire_on_commit=False)
+        self._db = async_sessionmaker(engine, expire_on_commit=False)
 
     # --- accounts and login sessions ---
 
@@ -154,7 +150,7 @@ class Store:
             profile=(profile or Profile()).model_dump(mode="json"),
         )
         try:
-            async with self._sessions.begin() as s:
+            async with self._db.begin() as s:
                 s.add(row)
         except IntegrityError:
             return None
@@ -162,7 +158,7 @@ class Store:
 
     async def credentials(self, email: str) -> tuple[UserOut, str] | None:
         """The user and their password hash, for login and for seeding accounts."""
-        async with self._sessions() as s:
+        async with self._db() as s:
             row = await s.scalar(select(User).where(User.email == _email(email)))
         return (UserOut.model_validate(row), row.password_hash) if row else None
 
@@ -171,7 +167,7 @@ class Store:
     ) -> None:
         """A new password also ends the account's sessions: whoever knew the old one,
         or still holds a cookie from it, is signed out."""
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             row = await s.get_one(User, user_id)
             row.is_admin = is_admin
             if password_hash:
@@ -184,17 +180,17 @@ class Store:
         query = update(User).where(User.is_admin).values(is_admin=False)
         if keep:
             query = query.where(User.email != _email(keep))
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             await s.execute(query)
 
     async def create_session(self, user_id: int, token_hash: str, expires_at: datetime) -> None:
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             # Sweeping expired sessions at each login keeps the table small without a cron.
             await s.execute(delete(AuthSession).where(AuthSession.expires_at <= utcnow()))
             s.add(AuthSession(token_hash=token_hash, user_id=user_id, expires_at=expires_at))
 
     async def session_user(self, token_hash: str) -> UserOut | None:
-        async with self._sessions() as s:
+        async with self._db() as s:
             row = await s.scalar(
                 select(User)
                 .join(AuthSession, AuthSession.user_id == User.id)
@@ -203,26 +199,26 @@ class Store:
         return UserOut.model_validate(row) if row else None
 
     async def delete_session(self, token_hash: str) -> None:
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             await s.execute(delete(AuthSession).where(AuthSession.token_hash == token_hash))
 
     # --- profile and long-term memory ---
 
     async def get_profile(self, user_id: int) -> Profile:
-        async with self._sessions() as s:
+        async with self._db() as s:
             row = await s.get_one(User, user_id)
         return Profile.model_validate(row.profile)
 
     async def put_profile(self, user_id: int, profile: Profile) -> Profile:
         """Save the questionnaire; saving it once is what completes onboarding."""
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             row = await s.get_one(User, user_id)
             row.profile = profile.model_dump(mode="json")
             row.onboarded = True
         return profile
 
     async def list_memory(self, user_id: int) -> list[MemoryOut]:
-        async with self._sessions() as s:
+        async with self._db() as s:
             rows = await s.scalars(
                 select(MemoryFact)
                 .where(MemoryFact.user_id == user_id)
@@ -232,7 +228,7 @@ class Store:
 
     async def memory_texts(self, user_id: int, limit: int) -> list[str]:
         """The newest facts first: what the agent gets as context for a run."""
-        async with self._sessions() as s:
+        async with self._db() as s:
             rows = await s.scalars(
                 select(MemoryFact.text)
                 .where(MemoryFact.user_id == user_id)
@@ -244,18 +240,19 @@ class Store:
     async def add_memory(
         self, user_id: int, facts: list[str], source_trip_id: str | None = None
     ) -> list[str]:
-        """Store the facts not known yet (compared case-insensitively); return them.
+        """Store the facts not known yet (by their words, as memory extraction compares
+        them: case and punctuation do not make a new fact); return them.
 
         Beyond MAX_MEMORY_FACTS the oldest facts are dropped.
         """
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             known = await s.scalars(select(MemoryFact.text).where(MemoryFact.user_id == user_id))
-            seen = {_same_fact(text) for text in known}
+            seen = {fact_key(text) for text in known}
             added: list[str] = []
             for fact in facts:
-                text = " ".join(fact.split())[:MAX_FACT_CHARS]
-                if text and _same_fact(text) not in seen:
-                    seen.add(_same_fact(text))
+                text = " ".join(fact.split())[:FACT_COLUMN_CHARS]
+                if text and fact_key(text) not in seen:
+                    seen.add(fact_key(text))
                     added.append(text)
             s.add_all(
                 MemoryFact(user_id=user_id, text=text, source_trip_id=source_trip_id)
@@ -272,7 +269,7 @@ class Store:
         return added
 
     async def delete_memory(self, user_id: int, fact_id: int) -> bool:
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             result = await s.execute(
                 delete(MemoryFact).where(MemoryFact.id == fact_id, MemoryFact.user_id == user_id)
             )
@@ -283,13 +280,13 @@ class Store:
     async def create_trip(
         self,
         user_id: int,
-        session: Session,
+        trip_run: TripRun,
         request: str,
         preferences: WalkPreferences,
         entry: HistoryEntry,
     ) -> None:
         row = Trip(
-            id=session.id,
+            id=trip_run.id,
             user_id=user_id,
             request=request,
             preferences=preferences.model_dump(mode="json"),
@@ -297,19 +294,19 @@ class Store:
             cost_usd=0.0,
             created_at=entry.at,
         )
-        _record_run(row, session, entry)
-        async with self._sessions.begin() as s:
+        _record_run(row, trip_run, entry)
+        async with self._db.begin() as s:
             s.add(row)
 
-    async def update_trip(self, user_id: int, session: Session, entry: HistoryEntry) -> None:
-        async with self._sessions.begin() as s:
-            row = await self._owned_trip(s, user_id, session.id)
+    async def update_trip(self, user_id: int, trip_run: TripRun, entry: HistoryEntry) -> None:
+        async with self._db.begin() as s:
+            row = await self._owned_trip(s, user_id, trip_run.id)
             if row is None:
-                raise LookupError(f"trip {session.id} of user {user_id} is gone")
-            _record_run(row, session, entry)
+                raise LookupError(f"trip {trip_run.id} of user {user_id} is gone")
+            _record_run(row, trip_run, entry)
 
     async def list_trips(self, user_id: int) -> list[TripSummary]:
-        async with self._sessions() as s:
+        async with self._db() as s:
             rows = await s.scalars(
                 select(Trip)
                 .options(_SUMMARY_ONLY)
@@ -319,7 +316,7 @@ class Store:
             return [TripSummary.model_validate(row) for row in rows]
 
     async def get_trip(self, user_id: int, trip_id: str) -> TripDetail | None:
-        async with self._sessions() as s:
+        async with self._db() as s:
             row = await self._owned_trip(s, user_id, trip_id)
         if row is None:
             return None
@@ -331,13 +328,13 @@ class Store:
             preferences=WalkPreferences.model_validate(row.preferences),
         )
 
-    async def load_session(self, user_id: int, trip_id: str) -> Session | None:
-        """The pipeline session a feedback run continues from."""
-        async with self._sessions() as s:
+    async def load_trip_run(self, user_id: int, trip_id: str) -> TripRun | None:
+        """The state a feedback run continues from."""
+        async with self._db() as s:
             row = await self._owned_trip(s, user_id, trip_id)
         if row is None:
             return None
-        return Session(
+        return TripRun(
             id=row.id,
             state=_STATE.validate_python(row.state),
             weather=_WEATHER.validate_python(row.weather),
@@ -345,7 +342,7 @@ class Store:
         )
 
     async def delete_trip(self, user_id: int, trip_id: str) -> bool:
-        async with self._sessions.begin() as s:
+        async with self._db.begin() as s:
             result = await s.execute(
                 delete(Trip).where(Trip.id == trip_id, Trip.user_id == user_id)
             )
@@ -360,7 +357,7 @@ class Store:
 
     async def llm_cost_since(self, since: datetime) -> float:
         """LLM spend of the saved runs since `since` (failed runs are not saved)."""
-        async with self._sessions() as s:
+        async with self._db() as s:
             histories = await s.scalars(select(Trip.history).where(Trip.updated_at >= since))
             return sum(
                 (
@@ -374,7 +371,7 @@ class Store:
 
     async def totals(self) -> dict[str, int | float]:
         since = today_start()
-        async with self._sessions() as s:
+        async with self._db() as s:
             users = await s.scalar(select(func.count()).select_from(User))
             trips = await s.scalar(select(func.count()).select_from(Trip))
             trips_today = await s.scalar(
@@ -399,7 +396,7 @@ class Store:
             .group_by(Trip.user_id)
             .subquery()
         )
-        async with self._sessions() as s:
+        async with self._db() as s:
             rows = await s.execute(
                 select(
                     User,
@@ -423,7 +420,7 @@ class Store:
             ]
 
     async def admin_trips(self, limit: int = 50) -> list[AdminTrip]:
-        async with self._sessions() as s:
+        async with self._db() as s:
             rows = await s.execute(
                 select(Trip, User.email)
                 .options(_SUMMARY_ONLY)
@@ -444,19 +441,19 @@ class Store:
             ]
 
 
-def _record_run(row: Trip, session: Session, entry: HistoryEntry) -> None:
+def _record_run(row: Trip, trip_run: TripRun, entry: HistoryEntry) -> None:
     """Copy a finished run into the trip row: the new plan, its state, one history line."""
-    plan = session.plan
+    plan = trip_run.plan
     if plan is None:
         raise ValueError("only a run that produced a plan is saved")
-    brief = session.state.brief
+    brief = trip_run.state.brief
     row.title = plan.title or f"{brief.city}, {brief.date:%d.%m.%Y}"
     row.city = brief.city
     row.date = brief.date
     row.stops = len(plan.stops)
     row.walk_km = round(plan.total_walk_m / 1000, 1)
-    row.state = _STATE.dump_python(session.state, mode="json")
-    row.weather = _WEATHER.dump_python(session.weather, mode="json")
+    row.state = _STATE.dump_python(trip_run.state, mode="json")
+    row.weather = _WEATHER.dump_python(trip_run.weather, mode="json")
     row.plan = plan.model_dump(mode="json")
     # A new list, not append(): plain JSON columns do not track in-place changes.
     row.history = [*row.history, entry.model_dump(mode="json")]

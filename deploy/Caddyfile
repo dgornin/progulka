@@ -1,5 +1,10 @@
 # Public entry point: automatic HTTPS for SITE_ADDRESS, proxy to the app container.
 {$SITE_ADDRESS} {
+	# Caddy has no default limit, and the app reads a body whole before validating it;
+	# the largest real body, a planner form, is a few kilobytes.
+	request_body {
+		max_size 64KB
+	}
 	reverse_proxy progulka:8000 {
 		# The agent's trace is streamed as NDJSON: pass every line through at once.
 		flush_interval -1

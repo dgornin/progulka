@@ -17,7 +17,7 @@ from app.planning import routing
 from app.planning.geo import haversine_m, street_meters, walk_limit_km, walk_minutes
 from app.planning.hours import earliest_open_at_or_after, is_open, open_intervals
 from app.planning.optimizer import optimize, schedule
-from app.planning.validator import matches_avoid, names_place, validate
+from app.planning.validator import matches_avoid, named_kinds, names_place, validate
 from app.sources.http import SourceError, http
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -476,10 +476,31 @@ def test_avoid_phrase_matches_whole_words_of_the_name():
         ("кафе", "cafe", "Кофемания", True),
         ("бары", "landmark", "Дом Баранова", False),  # short stems never match names
         ("кафе", "landmark", "Кафедральный собор", False),
+        # A word of the phrase is a stem plus a short ending, not any word it starts.
+        ("барокко", "bar", "Бар", False),
+        ("без парковок", "park", "Парк", False),
+        ("без кинотеатров", "cinema", "Аврора", True),
+        ("no shopping", "shop", "Shop", True),
+        ("без пивнушек", "pub", "Паб", True),
+        ("алкогольные напитки", "bar", "Бар", True),
+        ("ресторанчики", "landmark", "Ресторанчик у моста", True),
     ],
 )
 def test_avoid_matches_kind_or_a_word_of_the_name(avoid, kind, name, expected):
     assert matches_avoid(avoid, kind, name) is expected
+
+
+@pytest.mark.parametrize(
+    "text, kinds",
+    [
+        ("без музеев", {"museum", "gallery"}),
+        ("Бары и тусовки", {"bar", "pub"}),
+        ("барокко", set()),
+        ("без парковок", set()),
+    ],
+)
+def test_named_kinds_is_what_the_brief_merge_and_the_validator_share(text, kinds):
+    assert named_kinds(text) == kinds
 
 
 @pytest.mark.parametrize(

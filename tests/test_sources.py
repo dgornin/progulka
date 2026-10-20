@@ -280,6 +280,18 @@ def test_wikivoyage_skips_listings_without_finite_coordinates_and_strips_escaped
     assert [p.name for p in places] == ["Кафе"]
 
 
+def test_wikivoyage_clips_an_overgrown_listing():
+    text = (
+        f"{{{{see|name={'Н' * 500}|lat=59.9|long=30.3|address={'а' * 500}|content={'т' * 5000}}}}}"
+    )
+
+    [place] = wikivoyage._parse_listings(text, "Page", "ru", {"see"})
+
+    assert len(place.name) == wikivoyage.MAX_NAME_CHARS
+    assert len(place.description) == wikivoyage.MAX_DESCRIPTION_CHARS
+    assert len(place.tags["address"]) == wikivoyage.MAX_TAG_CHARS
+
+
 async def test_wikivoyage_rejects_unknown_sections(api):
     with pytest.raises(ValueError, match="sleep"):
         await wikivoyage.listings("Paris", lang="en", sections=["see", "sleep"])

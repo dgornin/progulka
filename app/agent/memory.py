@@ -61,18 +61,18 @@ async def extract_memory(llm: LLM, texts: list[str], known: list[str]) -> list[s
     except (LLMError, TimeoutError):
         return []
 
-    seen = {_key(fact) for fact in known}
+    seen = {fact_key(fact) for fact in known}
     facts = []
     for fact in learned.facts:
         fact = " ".join(fact.split()).rstrip(".")
         # A long "fact" is a retelling of the request, which is exactly what not to keep.
-        if not fact or len(fact) > MAX_FACT_CHARS or _key(fact) in seen:
+        if not fact or len(fact) > MAX_FACT_CHARS or fact_key(fact) in seen:
             continue
-        seen.add(_key(fact))
+        seen.add(fact_key(fact))
         facts.append(fact)
     return facts[:MAX_NEW_FACTS]
 
 
-def _key(fact: str) -> str:
+def fact_key(fact: str) -> str:
     """Compare facts by their words only: case and punctuation do not make a new fact."""
     return " ".join(re.findall(r"\w+", fact.casefold()))

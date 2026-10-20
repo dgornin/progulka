@@ -28,6 +28,11 @@ from app.sources.wikipedia import query_mediawiki
 SECTION_KIND = {"see": "sight", "do": "activity", "eat": "food", "drink": "bar", "buy": "shop"}
 MIN_LISTINGS = 30  # fewer on the city page: an overview, the places live on district pages
 MAX_DISTRICTS = 4
+# A wiki page is edited by anyone, and its text reaches the agent's context. The caps sit
+# well above the longest real listings (about 2300, 90 and 260 characters).
+MAX_DESCRIPTION_CHARS = 3000
+MAX_NAME_CHARS = 200
+MAX_TAG_CHARS = 300
 
 _LISTING_NAMES = "see|do|eat|drink|buy|sleep|go|listing|marker"
 _REGIONLIST = re.compile(r"\{\{\s*regionlist", re.I)
@@ -101,7 +106,7 @@ def _parse_listings(text: str, page: str, lang: str, wanted: set[str]) -> list[P
         params = _params(body)
         generic = template.lower() in ("listing", "marker")
         section = (params.get("type", "") if generic else template).lower()
-        name = _clean(params.get("name", ""))
+        name = _clean(params.get("name", ""))[:MAX_NAME_CHARS]
         try:
             lat, lon = float(params["lat"]), float(params["long"])
         except (KeyError, ValueError):
@@ -113,6 +118,7 @@ def _parse_listings(text: str, page: str, lang: str, wanted: set[str]) -> list[P
         content = _clean(params.get("content") or params.get("description") or "")
         hours = _clean(params.get("hours", ""))
         description = " ".join(filter(None, [content, f"{hours_label}: {hours}" if hours else ""]))
+        description = description[:MAX_DESCRIPTION_CHARS]
         tags = {
             "address": _clean(params.get("address", "")),
             "hours": hours,
@@ -130,7 +136,7 @@ def _parse_listings(text: str, page: str, lang: str, wanted: set[str]) -> list[P
                 source="wikivoyage",
                 url=f"https://{lang}.wikivoyage.org/wiki/{quote(page.replace(' ', '_'))}",
                 description=description or None,
-                tags={k: v.strip() for k, v in tags.items() if v.strip()},
+                tags={k: v.strip()[:MAX_TAG_CHARS] for k, v in tags.items() if v.strip()},
             )
         )
     return places

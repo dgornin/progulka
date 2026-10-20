@@ -37,8 +37,8 @@
  *   .toasts > .toast, dialog.dialog      built by js/ui.js toast() / confirmDialog()
  *   .empty > h2 + p       empty state with the dotted-route sketch
  *   .table-wrap > table.table (td.num right-aligned mono)
- *   .tag .count .skeleton .spinner .sr-only
- *   @keyframes rise pop pulse stripes spin; all motion is off under prefers-reduced-motion
+ *   .tag .count .skeleton .sr-only
+ *   @keyframes rise pop pulse stripes shimmer; all motion is off under prefers-reduced-motion
  */
 
 :root {
@@ -569,16 +569,6 @@ button.chip[data-tone="avoid"][aria-pressed="true"] { border-color: var(--ink); 
   animation: shimmer 1.4s ease-in-out infinite;
 }
 
-.spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-
 /* ---------- top bar (markup from js/nav.js) ---------- */
 
 .topbar {
@@ -655,7 +645,6 @@ button.chip[data-tone="avoid"][aria-pressed="true"] { border-color: var(--ink); 
 @keyframes pop { from { opacity: 0; transform: scale(0.3); } }
 @keyframes pulse { 50% { opacity: 0.3; } }
 @keyframes stripes { to { background-position: 28px 0; } }
-@keyframes spin { to { transform: rotate(1turn); } }
 @keyframes shimmer { to { background-position: -150% 0; } }
 
 @media (prefers-reduced-motion: reduce) {

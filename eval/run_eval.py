@@ -128,8 +128,8 @@ async def run_agent(base: LLM, request: str) -> tuple[Metrics, TripBrief, GeoPoi
         events.append(event)
 
     started = clock.monotonic()
-    session = await plan_trip(PlanRequest(request=request), llm, collect, today=TODAY)
-    plan = session.plan
+    trip_run = await plan_trip(PlanRequest(request=request), llm, collect, today=TODAY)
+    plan = trip_run.plan
     points = [
         Point(s.place.name, s.place.lat, s.place.lon, s.place.opening_hours, s.arrive, s.depart)
         for s in plan.stops

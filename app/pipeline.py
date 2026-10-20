@@ -13,18 +13,17 @@ round listens to.
 
 Feedback re-enters at research (when new places are needed) or at optimize, and
 every route, first or rebuilt, goes through the same validation and repair round.
-A feedback run that fails or is cancelled leaves the session as it was.
+A failed feedback run is not saved: the caller stores the trip only after success.
 
 Personal context: the planner panel, the request, the profile and later the feedback
 are merged into the brief by code (app/personalization.py); long-term memory and the
 profile's notes reach the research agent and the writer as data; after a successful
 run the traveller's own words are mined for new durable facts (app/agent/memory.py),
-which the pipeline returns in Session.learned for the caller to store. The pipeline
-keeps nothing between runs: the caller persists sessions, so a trip survives a restart.
+which the pipeline returns in TripRun.learned for the caller to store. The pipeline
+keeps nothing between runs: the caller persists each TripRun, so a trip survives a restart.
 """
 
 import asyncio
-import copy
 import datetime as dt
 import uuid
 from collections.abc import Sequence
@@ -32,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.agent.brief import parse_brief
 from app.agent.memory import extract_memory
@@ -49,6 +48,7 @@ from app.models import (
     Emit,
     GeoPoint,
     HourWeather,
+    LocalTime,
     Plan,
     TripBrief,
 )
@@ -63,7 +63,7 @@ from app.personalization import (
 from app.planning.geo import walk_limit_km
 from app.planning.optimizer import optimize, schedule
 from app.planning.routing import walking_route
-from app.planning.validator import matches_avoid, validate
+from app.planning.validator import matches_avoid, names_place, validate
 from app.profile import Profile, WalkPreferences
 from app.sources import geocode, weather
 from app.sources.http import SourceError
@@ -77,10 +77,20 @@ REPAIR_STEPS, REPAIR_BUDGET_S = 6, 60.0
 # minutes the shared HTTP client spends on retries.
 GEOCODE_TIMEOUT_S = 30
 WEATHER_TIMEOUT_S = 10
+# The brief and the feedback are one structured LLM call each, which the LLM client's
+# retries can stretch to minutes; the research and the writer have budgets of their own.
+LLM_STEP_TIMEOUT_S = 60
+# In a shorter window the optimizer can place no stop: refused before the research.
+MIN_WINDOW = timedelta(minutes=30)
 
 
 class PipelineError(RuntimeError):
     """A failure the user can act on (unknown city, empty result); shown as is."""
+
+
+# Raised in two places each; the API refuses an empty form itself, before a run starts.
+EMPTY_REQUEST = "Опишите прогулку или укажите город"
+LLM_TIMEOUT = "LLM-провайдер не ответил вовремя, попробуйте ещё раз"
 
 
 class PlanRequest(BaseModel):
@@ -91,8 +101,8 @@ class PlanRequest(BaseModel):
     city: str | None = Field(None, max_length=100)
     # `dt.` because a field named `date` shadows the type inside the class body.
     date: dt.date | None = None
-    start_time: dt.time | None = None
-    end_time: dt.time | None = None
+    start_time: LocalTime | None = None
+    end_time: LocalTime | None = None
     start_point: str | None = Field(None, max_length=200)
     preferences: WalkPreferences = Field(default_factory=WalkPreferences)
 
@@ -106,6 +116,17 @@ class PlanRequest(BaseModel):
     def _blank_is_none(cls, value: str | None) -> str | None:
         return (value or "").strip() or None
 
+    @model_validator(mode="after")
+    def _window(self) -> "PlanRequest":
+        if self.start_time and self.end_time and self.end_time <= self.start_time:
+            raise ValueError("Конец прогулки должен быть позже начала")
+        return self
+
+
+def has_place(req: PlanRequest, profile: Profile | None) -> bool:
+    """The request can be planned: its text, the form or the profile names a city."""
+    return bool(req.request or req.city or (profile and profile.home_city))
+
 
 class FeedbackRequest(BaseModel):
     feedback: str = Field("", max_length=1000)
@@ -113,7 +134,9 @@ class FeedbackRequest(BaseModel):
 
 
 @dataclass
-class Session:
+class TripRun:
+    """A trip's working state: what a feedback run continues from. The id is the trip's."""
+
     id: str
     state: ResearchState
     weather: list[HourWeather]
@@ -136,25 +159,36 @@ async def plan_trip(
     today: date,
     profile: Profile | None = None,
     memory: list[str] | None = None,
-) -> Session:
+) -> TripRun:
     """`memory` is the traveller's long-term memory; None means the caller keeps none
     (the eval, an anonymous run), and then nothing is learned either."""
-    if not req.request and not req.city and not (profile and profile.home_city):
-        raise PipelineError("Опишите прогулку или укажите город")
+    if not has_place(req, profile):
+        raise PipelineError(EMPTY_REQUEST)
     await stage(emit, "brief", "start", "Разбираю запрос")
     form = req.model_dump(exclude={"request", "preferences"}, exclude_none=True)
     try:
-        brief = await parse_brief(
-            llm,
-            req.request,
-            today,
-            overrides=brief_overrides(form, req.preferences),
-            defaults=brief_defaults(profile),
-        )
+        async with asyncio.timeout(LLM_STEP_TIMEOUT_S):
+            brief = await parse_brief(
+                llm,
+                req.request,
+                today,
+                overrides=brief_overrides(form, req.preferences),
+                defaults=brief_defaults(profile),
+            )
     except ValueError as e:
         raise PipelineError("В запросе не указан город: напишите, где гуляем") from e
+    except TimeoutError as e:
+        raise PipelineError(LLM_TIMEOUT) from e
     brief = personalize(brief, req.preferences, profile)
     await stage(emit, "brief", "done", "Запрос разобран", brief.model_dump(mode="json"))
+    window = datetime.combine(brief.date, brief.end_time) - datetime.combine(
+        brief.date, brief.start_time
+    )
+    if window < MIN_WINDOW:
+        raise PipelineError(
+            f"Окно прогулки {brief.start_time:%H:%M}–{brief.end_time:%H:%M} слишком короткое: "
+            f"нужно хотя бы {MIN_WINDOW.seconds // 60} минут"
+        )
 
     await stage(emit, "weather", "start", "Ищу город и смотрю прогноз погоды")
     try:
@@ -166,17 +200,24 @@ async def plan_trip(
         raise PipelineError(f"Не нашёл город «{brief.city}» в OpenStreetMap")
     start = GeoPoint(lat=city.center.lat, lon=city.center.lon, label=f"центр, {city.name}")
     if brief.start_point:
+        # Not found or not answered, the city centre is a fine start; the warning says which.
         try:
             async with asyncio.timeout(GEOCODE_TIMEOUT_S):
                 found = await geocode.geocode(
                     brief.start_point, city=brief.city, country=brief.country
                 )
         except (SourceError, TimeoutError):
-            found = None  # the city centre is a fine start: same fallback as "not found"
-        if found:
-            start = found
+            await emit(
+                _warning(
+                    f"Геокодер OpenStreetMap не ответил на поиск «{brief.start_point}», "
+                    "начинаю из центра города"
+                )
+            )
         else:
-            await emit(_warning(f"Не нашёл «{brief.start_point}», начинаю из центра города"))
+            if found:
+                start = found
+            else:
+                await emit(_warning(f"Не нашёл «{brief.start_point}», начинаю из центра города"))
 
     try:
         async with asyncio.timeout(WEATHER_TIMEOUT_S):
@@ -200,9 +241,9 @@ async def plan_trip(
         shortlist={},
         excluded=set(),
     )
-    session = Session(id=uuid.uuid4().hex[:12], state=state, weather=hours)
+    trip_run = TripRun(id=uuid.uuid4().hex[:12], state=state, weather=hours)
     await _research_and_build(
-        session,
+        trip_run,
         llm,
         emit,
         goal=None,
@@ -210,28 +251,32 @@ async def plan_trip(
         time_budget_s=RESEARCH_BUDGET_S,
         facts=traveller_facts(profile, memory or []),
     )
-    session.learned = await _learn(llm, emit, req.request, profile, memory)
-    return session
+    trip_run.learned = await _learn(llm, emit, req.request, profile, memory)
+    return trip_run
 
 
 async def apply_feedback(
-    session: Session,
+    trip_run: TripRun,
     req: FeedbackRequest,
     llm: LLM,
     emit: Emit,
     profile: Profile | None = None,
     memory: list[str] | None = None,
-) -> tuple[Session, str | None]:
+) -> tuple[TripRun, str | None]:
     """`profile` and `memory` as in plan_trip; the brief was personalised when the
     trip was planned, here they only inform the agent, the writer and the learning."""
-    if session.plan is None:
-        raise PipelineError("У этой сессии ещё нет маршрута")
-    session.learned = []
+    if trip_run.plan is None:
+        raise PipelineError("У этой поездки ещё нет маршрута")
+    trip_run.learned = []
     facts = traveller_facts(profile, memory or [])
     await stage(emit, "feedback", "start", "Разбираю правку")
-    stops = {stop.place.id: stop.place.name for stop in session.plan.stops}
+    stops = {stop.place.id: stop.place.name for stop in trip_run.plan.stops}
     if req.feedback.strip():
-        edit = await interpret_feedback(llm, session.plan, req.feedback)
+        try:
+            async with asyncio.timeout(LLM_STEP_TIMEOUT_S):
+                edit = await interpret_feedback(llm, trip_run.plan, req.feedback)
+        except TimeoutError as e:
+            raise PipelineError(LLM_TIMEOUT) from e
     else:
         # The "Убрать" button: nothing to interpret, so no LLM call. The traveller did
         # not ask for a shorter walk, so the agent looks for a replacement. The names
@@ -242,32 +287,27 @@ async def apply_feedback(
             research_goal=REPLACE_GOAL.format(names=", ".join(removed)) if removed else None,
         )
     # Only current stops: ids from the client end up in the agent's prompt.
-    excluded = {i for i in [*edit.exclude_place_ids, *req.exclude_place_ids] if i in stops}
+    excluded = {
+        i: stops[i] for i in [*edit.exclude_place_ids, *req.exclude_place_ids] if i in stops
+    }
 
-    saved = copy.deepcopy(session.state), list(session.weather)
-    try:
-        _apply_edit(session, edit, excluded)
-        await stage(emit, "feedback", "done", edit.reply, edit.model_dump(mode="json"))
-        if edit.research_goal:
-            await _research_and_build(
-                session,
-                llm,
-                emit,
-                goal=edit.research_goal,
-                max_steps=FEEDBACK_STEPS,
-                time_budget_s=FEEDBACK_BUDGET_S,
-                facts=facts,
-            )
-        else:
-            plan = await _build_checked(session, llm, emit, facts)
-            await _write(session, llm, emit, plan, facts)
-    except BaseException:
-        # Also on cancellation (the client went away): the next edit must start from
-        # the plan the traveller sees, not from half of this one.
-        session.state, session.weather = saved
-        raise
-    session.learned = await _learn(llm, emit, req.feedback, profile, memory)
-    return session, edit.reply
+    _apply_edit(trip_run, edit, excluded)
+    await stage(emit, "feedback", "done", edit.reply, edit.model_dump(mode="json"))
+    if edit.research_goal:
+        await _research_and_build(
+            trip_run,
+            llm,
+            emit,
+            goal=edit.research_goal,
+            max_steps=FEEDBACK_STEPS,
+            time_budget_s=FEEDBACK_BUDGET_S,
+            facts=facts,
+        )
+    else:
+        plan = await _build_checked(trip_run, llm, emit, facts)
+        await _write(trip_run, llm, emit, plan, facts)
+    trip_run.learned = await _learn(llm, emit, req.feedback, profile, memory)
+    return trip_run, edit.reply
 
 
 async def _learn(
@@ -276,18 +316,20 @@ async def _learn(
     """New long-term facts from the traveller's own words of this run.
 
     Runs only after the run succeeded, and not for the "Убрать" button: an empty text
-    has nothing to learn from.
+    has nothing to learn from. A stage of its own: the plan is sent only after it.
     """
     if memory is None or not text.strip():
         return []
+    await stage(emit, "memory", "start", "Запоминаю, что узнал о вас")
     learned = await extract_memory(llm, [text], known=[*memory, *profile_facts(profile)])
     if learned:
         await emit(AgentEvent(type="memory", data={"facts": learned}))
+    await stage(emit, "memory", "done", f"Новых фактов: {len(learned)}")
     return learned
 
 
 async def _research_and_build(
-    session: Session,
+    trip_run: TripRun,
     llm: LLM,
     emit: Emit,
     goal: str | None,
@@ -298,7 +340,7 @@ async def _research_and_build(
     await stage(emit, "research", "start", "Агент ищет места")
     result = await research(
         llm,
-        session.state,
+        trip_run.state,
         emit,
         max_steps=max_steps,
         goal=goal,
@@ -316,42 +358,37 @@ async def _research_and_build(
             "candidates": len(result.candidates),
         },
     )
-    if not session.state.shortlist:
+    if not trip_run.state.shortlist:
         if result.stop_reason == "finished":
             raise PipelineError("Агент не нашёл подходящих мест. Попробуйте расширить запрос.")
         # A budget or a guard fired: the request itself may be fine.
         reason = _STOP_REASONS.get(result.stop_reason, result.stop_reason)
         raise PipelineError(f"Агент остановился, не найдя мест: {reason}. Попробуйте ещё раз.")
-    await _write(session, llm, emit, await _build_checked(session, llm, emit, facts), facts)
+    await _write(trip_run, llm, emit, await _build_checked(trip_run, llm, emit, facts), facts)
 
 
-async def _build_checked(session: Session, llm: LLM, emit: Emit, facts: Sequence[str]) -> Plan:
+async def _build_checked(trip_run: TripRun, llm: LLM, emit: Emit, facts: Sequence[str]) -> Plan:
     """Build and validate the route; on errors, one bounded repair round.
 
-    The validator's findings become the research agent's goal, and the stops that
-    break the avoid list are rejected outright. A route with no stops is never
-    returned as a result.
+    The validator's findings become the research agent's goal. A route with no stops
+    is never returned as a result.
     """
-    plan = await _build(session, emit)
+    plan = await _build(trip_run, emit)
     errors = [v for v in plan.violations if v.severity == "error"]
     if errors:
         await stage(emit, "repair", "start", "Валидатор нашёл проблемы — агент исправляет")
-        for v in errors:
-            if v.code == "avoid_violation" and v.place_id:
-                session.state.excluded.add(v.place_id)
-                session.state.shortlist.pop(v.place_id, None)
         # The messages stay in the traveller's language: they are data for the agent.
         goal = REPAIR_GOAL.format(problems="\n".join(f"- {v.message}" for v in errors))
         result = await research(
             llm,
-            session.state,
+            trip_run.state,
             emit,
             max_steps=REPAIR_STEPS,
             goal=goal,
             time_budget_s=REPAIR_BUDGET_S,
             traveller_facts=facts,
         )
-        plan = await _build(session, emit)
+        plan = await _build(trip_run, emit)
         await stage(emit, "repair", "done", "Исправление завершено", {"steps": result.steps})
     if not plan.stops:
         raise PipelineError(
@@ -361,18 +398,24 @@ async def _build_checked(session: Session, llm: LLM, emit: Emit, facts: Sequence
     return plan
 
 
-async def _write(session: Session, llm: LLM, emit: Emit, plan: Plan, facts: Sequence[str]) -> None:
+async def _write(trip_run: TripRun, llm: LLM, emit: Emit, plan: Plan, facts: Sequence[str]) -> None:
     await stage(emit, "write", "start", "Пишу описания остановок")
-    session.plan = await write_texts(llm, plan, facts)
+    trip_run.plan = await write_texts(llm, plan, facts)
     await stage(emit, "write", "done", "Маршрут готов")
 
 
-async def _build(session: Session, emit: Emit) -> Plan:
-    state = session.state
-    candidates = [c for pid, c in state.shortlist.items() if pid not in state.excluded]
+async def _build(trip_run: TripRun, emit: Emit) -> Plan:
+    state = trip_run.state
+    # What the traveller rejected, and what the current avoid list rules out.
+    candidates = [
+        c
+        for pid, c in state.shortlist.items()
+        if pid not in state.excluded
+        and not any(matches_avoid(a, c.place.kind, c.place.name) for a in state.brief.avoid)
+    ]
 
     await stage(emit, "optimize", "start", "Строю порядок обхода")
-    result = optimize(candidates, state.start, state.brief, session.weather)
+    result = optimize(candidates, state.start, state.brief, trip_run.weather)
     order: list[Candidate] = list(result.order)
     dropped = list(result.dropped)
     await stage(
@@ -384,22 +427,28 @@ async def _build(session: Session, emit: Emit) -> Plan:
     )
 
     await stage(emit, "route", "start", "Прокладываю пешеходный маршрут")
+    # The bounds are what the optimizer accepted, not the absolute limits: a required
+    # place may already end the walk late or make it long, and the optional stops
+    # around it are not to blame for that.
+    estimate = schedule(order, state.start, state.brief)
     window_end = datetime.combine(state.brief.date, state.brief.end_time)
+    end_limit = max(window_end, estimate.stops[-1].depart) if estimate.stops else window_end
+    walk_limit_m = max(walk_limit_km(state.brief) * 1000, estimate.total_walk_m)
     while True:
         points = [state.start] + [GeoPoint(lat=c.place.lat, lon=c.place.lon) for c in order]
         route = await walking_route(points) if order else None
         timed = schedule(order, state.start, state.brief, route.leg_meters if route else None)
         # Real streets can be longer than the optimizer's estimate; if the walk no
-        # longer fits the window or the distance limit, drop the weakest optional stop
-        # and route again.
-        late = timed.stops and timed.stops[-1].depart > window_end
-        too_long = timed.total_walk_m > walk_limit_km(state.brief) * 1000
+        # longer fits those bounds, drop the weakest optional stop and route again.
+        late = timed.stops and timed.stops[-1].depart > end_limit
+        too_long = timed.total_walk_m > walk_limit_m
         optional = [c for c in order if not c.required]
         if not (late or too_long) or len(order) <= 2 or not optional:
             break
         weakest = min(optional, key=lambda c: (c.score, c.place.id))
         order.remove(weakest)
         dropped.append(weakest.place.id)
+    routed_out = len(dropped) - len(result.dropped)
     # No route: no geometry, and the UI joins the stops with dotted straight lines.
     geometry = route.geometry if route else None
     await stage(
@@ -407,6 +456,7 @@ async def _build(session: Session, emit: Emit) -> Plan:
         "route",
         "done",
         f"{timed.total_walk_m / 1000:.1f} км пешком"
+        + (f", убрано после маршрутизации: {routed_out}" if routed_out else "")
         + ("" if route else " (по прямой: сервис маршрутов недоступен)"),
     )
 
@@ -420,7 +470,7 @@ async def _build(session: Session, emit: Emit) -> Plan:
         dropped=dropped,
     )
     await stage(emit, "validate", "start", "Проверяю маршрут")
-    plan.violations = validate(plan, session.weather)
+    plan.violations = validate(plan, trip_run.weather)
     n_err = sum(v.severity == "error" for v in plan.violations)
     n_warn = len(plan.violations) - n_err
     await stage(
@@ -433,21 +483,35 @@ async def _build(session: Session, emit: Emit) -> Plan:
     return plan
 
 
-def _apply_edit(session: Session, edit: PlanEdit, excluded: set[str]) -> None:
-    state = session.state
+def _apply_edit(trip_run: TripRun, edit: PlanEdit, excluded: dict[str, str]) -> None:
+    """`excluded`: the stops the traveller removed, id -> name."""
+    state = trip_run.state
     # A new avoid phrase applies to the whole shortlist at once, so the rebuilt route
     # cannot pick an avoided place that did not fit before.
-    avoided = [
-        pid
+    avoided = {
+        pid: c.place.name
         for pid, c in state.shortlist.items()
         if any(matches_avoid(avoid, c.place.kind, c.place.name) for avoid in edit.add_avoid)
-    ]
-    for pid in [*excluded, *avoided]:
+    }
+    for pid in excluded:
         state.excluded.add(pid)
         state.shortlist.pop(pid, None)
+    # Avoided places are not rejected for good: _build enforces the avoid list as it is
+    # at the time, so feedback that lifts the avoid makes them eligible again.
+    for pid in avoided:
+        state.shortlist.pop(pid, None)
+    # A place the traveller asked for and now removes is no longer asked for: research
+    # must not search it again, nor the validator report it missing.
+    names = [*excluded.values(), *avoided.values()]
+    wanted = [w for w in state.brief.must_include if not any(names_place(w, n) for n in names)]
     # The feedback is the newest layer of the brief's precedence: «добавь музей» must
-    # lift the profile's «не предлагать музеи», or the validator rejects the museum.
-    brief = with_feedback(state.brief, edit.add_interests, edit.remove_interests, edit.add_avoid)
+    # lift the profile's «не предлагать музеи», or the route leaves the museum out.
+    brief = with_feedback(
+        state.brief.model_copy(update={"must_include": wanted}),
+        edit.add_interests,
+        edit.remove_interests,
+        edit.add_avoid,
+    )
     update: dict[str, Any] = {}
     if edit.start_time:
         update["start_time"] = edit.start_time
@@ -457,7 +521,7 @@ def _apply_edit(session: Session, edit: PlanEdit, excluded: set[str]) -> None:
     if edit.rain_from:
         # The traveller's own forecast wins: mark those hours rainy, and the optimizer
         # and validator treat outdoor stops in them exactly as they treat forecast rain.
-        session.weather = _with_rain(session.weather, state.brief, edit.rain_from)
+        trip_run.weather = _with_rain(trip_run.weather, state.brief, edit.rain_from)
         state.weather_summary += f"; the traveller expects rain from {edit.rain_from:%H:%M}"
 
 

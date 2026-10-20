@@ -24,6 +24,9 @@ from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# Width of a stored memory fact; facts the pipeline learns are far shorter (memory.py).
+FACT_COLUMN_CHARS = 300
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -74,7 +77,7 @@ class MemoryFact(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    text: Mapped[str] = mapped_column(String(300))
+    text: Mapped[str] = mapped_column(String(FACT_COLUMN_CHARS))
     source_trip_id: Mapped[str | None] = mapped_column(ForeignKey("trips.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
@@ -82,7 +85,7 @@ class MemoryFact(Base):
 class Trip(Base):
     __tablename__ = "trips"
 
-    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # pipeline Session.id
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # pipeline TripRun.id
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(200))
     city: Mapped[str] = mapped_column(String(100))

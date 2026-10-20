@@ -58,12 +58,14 @@ async def research(
     llm: LLM,
     state: ResearchState,
     emit: Emit,
-    max_steps: int = 14,
+    *,
+    max_steps: int,
+    time_budget_s: float,
     goal: str | None = None,
-    time_budget_s: float = 150.0,
     traveller_facts: Sequence[str] = (),
 ) -> ResearchResult:
-    """`traveller_facts`: long-term memory and profile notes, shown to the agent as data."""
+    """The budgets are the caller's (app/pipeline.py), set per kind of run.
+    `traveller_facts`: long-term memory and profile notes, shown to the agent as data."""
     state.finish_attempts = 0
     messages: list[dict[str, Any]] = [
         # The language rule sits in the system prompt too: deep into a long loop of English

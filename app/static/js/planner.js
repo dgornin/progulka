@@ -40,21 +40,23 @@ const STAGES = [
   ["validate", "Проверка"],
   ["repair", "Правка"],
   ["write", "Тексты"],
+  ["memory", "Память"],
 ];
-// Stages a fresh plan always goes through; "repair" and the stages of a feedback run
-// appear in the strip only once the server actually starts them.
+// Stages a fresh plan always goes through; "repair", "memory" and the stages of a
+// feedback run appear in the strip only once the server actually starts them.
 const PLAN_STAGES = ["brief", "weather", "research", "optimize", "route", "validate", "write"];
 
-// Tool names are matched by keyword so the icons survive renames on the agent side.
-const TOOL_KINDS = [
-  [/voyage/i, "WV", "src-wikivoyage", "Wikivoyage"],
-  [/wiki/i, "W", "src-wikipedia", "Википедия"],
-  [/osm|overpass/i, "OSM", "src-osm", "OpenStreetMap"],
-  [/detail/i, "i", "tool-details", "Подробности о месте"],
-  [/shortlist/i, "★", "tool-shortlist", "В шорт-лист"],
-  [/remove/i, "−", "tool-shortlist", "Из шорт-листа"],
-  [/finish/i, "✓", "tool-finish", "Конец поиска"],
-];
+// Keys are the agent's tool names (GET /api/tools). A Map, not an object: the name comes
+// from the model, and "constructor" must not find Object's.
+const TOOL_KINDS = new Map([
+  ["get_wikivoyage_listings", ["WV", "src-wikivoyage", "Wikivoyage"]],
+  ["search_wikipedia", ["W", "src-wikipedia", "Википедия"]],
+  ["search_osm", ["OSM", "src-osm", "OpenStreetMap"]],
+  ["get_place_details", ["i", "tool-details", "Подробности о месте"]],
+  ["shortlist_place", ["★", "tool-shortlist", "В шорт-лист"]],
+  ["remove_place", ["−", "tool-shortlist", "Из шорт-листа"]],
+  ["finish_research", ["✓", "tool-finish", "Конец поиска"]],
+]);
 
 // Place.kind values the sources produce: OSM categories, "landmark" for Wikipedia
 // articles and the Wikivoyage section kinds.
@@ -443,7 +445,7 @@ function onThought({ text }) {
 }
 
 function toolBadge(name) {
-  const [, glyph, cls, title] = TOOL_KINDS.find(([pattern]) => pattern.test(name)) ?? [null, "ƒ", "", "Инструмент"];
+  const [glyph, cls, title] = TOOL_KINDS.get(name) ?? ["ƒ", "", "Инструмент"];
   return badge(glyph, cls, title);
 }
 
