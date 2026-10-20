@@ -13,7 +13,8 @@ pipeline and one agent loop inside every day.
 A trip of several days is Plan-and-Execute (lecture 04): the outline is the plan (a
 theme, the focus interests, an area and the named places of every day,
 app/agent/outline.py), the research agents are the executors, one per day, and the
-replanner (app/agent/replanner.py) edits one day when the traveller gives feedback.
+replanner (app/agent/replanner.py) edits one day when the traveller gives feedback;
+journey_replanner coordinates edits and stop transfers across several days.
 A one-day trip, a single walk, makes no outline call and runs exactly as a walk
 always did. The forecast comes before the outline, so the planner can put the
 museums on the rainy day.
@@ -42,7 +43,9 @@ optimize, with the stops of the other days taken and the places removed from the
 kept out, and every route, first or rebuilt, goes through the same validation and
 repair round. A stop of another day is out for good; a place removed from another
 day is out until the traveller asks for it on this one: «Убрать» on one day and
-«добавь X» on another is how a place moves between days. A failed feedback run is
+«добавь X» on another can move a place between days. Trip-wide feedback can also move
+stops directly, preparing every affected day on a copy and saving them together.
+A failed feedback run is
 not saved: the caller stores the trip only after success.
 
 Personal context: the planner panel, the request, the profile and later the feedback
@@ -56,6 +59,7 @@ keeps nothing between runs: the caller persists the journey, so it survives a re
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from itertools import pairwise
@@ -64,6 +68,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.agent.brief import parse_brief
+from app.agent.journey_replanner import interpret_journey_feedback, validate_edit
 from app.agent.memory import extract_memory
 from app.agent.outline import draft_days, locate_areas, one_day, trip_dates
 from app.agent.prompts import DAY_GOAL, REPAIR_GOAL, REPLACE_GOAL
@@ -182,6 +187,17 @@ def has_place(req: PlanRequest, profile: Profile | None) -> bool:
 class FeedbackRequest(BaseModel):
     feedback: str = Field("", max_length=1000)
     exclude_place_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class JourneyFeedbackRequest(BaseModel):
+    feedback: str = Field(..., min_length=1, max_length=1000)
+
+    @field_validator("feedback")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Опишите, что изменить в поездке")
+        return value.strip()
 
 
 @dataclass
@@ -358,6 +374,152 @@ async def apply_day_feedback(
         journey.title = _single_title(day)  # a single walk is named after its route
     journey.learned = await _learn(llm, emit, req.feedback, profile, memory)
     return journey, reply
+
+
+async def apply_journey_feedback(
+    journey: Journey,
+    req: JourneyFeedbackRequest,
+    llm: LLM,
+    emit: Emit,
+    profile: Profile | None = None,
+    memory: list[str] | None = None,
+) -> tuple[Journey, str, list[int]]:
+    """Prepare all edits on a private copy; a failed day leaves the input untouched.
+
+    Day agents research in parallel, with transferred stops reserved for their
+    destination. Routes are then built in order and checked together before any
+    writer or persistence step can publish the coordinated result.
+    """
+    await stage(emit, "feedback", "start", "Согласую изменения поездки")
+    plans = [day.plan for day in journey.days]
+    assert all(plan is not None for plan in plans)
+    try:
+        async with asyncio.timeout(LLM_STEP_TIMEOUT_S):
+            edit = await interpret_journey_feedback(llm, plans, journey.outline, req.feedback)
+        changed = validate_edit(edit, plans)
+    except TimeoutError as e:
+        raise PipelineError(LLM_TIMEOUT) from e
+    except ValueError as e:
+        raise PipelineError(str(e)) from e
+
+    # In-flight source caches can contain asyncio futures, which cannot be copied.
+    # A feedback run gets fresh caches while preserving shared registry identity.
+    updated = deepcopy(journey, {id(day.state.searches): {} for day in journey.days})
+    days = updated.days
+    edits = {day.day_index: day for day in edit.days}
+    owners = [{stop.place.id for stop in day.plan.stops} for day in days]
+    transfers: list[tuple[int, Candidate]] = []
+    for move in edit.moves:
+        source = days[move.source_day]
+        candidate = source.state.shortlist[move.place_id]
+        if any(same_place(candidate.place, c.place) for _, c in transfers):
+            raise PipelineError("Одно место указано для переноса несколько раз.")
+        transfers.append((move.target_day, candidate))
+        owners[move.source_day].discard(move.place_id)
+        owners[move.target_day].add(move.place_id)
+        _apply_edit(source, PlanEdit(reply=""), {move.place_id: candidate.place.name})
+
+    # Apply every removal first: even the first day's researcher must see exclusions
+    # introduced on a later day by this same request.
+    for i in changed:
+        day = days[i]
+        day_edit = edits.get(i)
+        if day_edit:
+            excluded = {
+                stop.place.id: stop.place.name
+                for stop in day.plan.stops
+                if stop.place.id in day_edit.exclude_place_ids
+            }
+            _apply_edit(day, day_edit, excluded)
+
+    # Establish every reservation before a researcher runs. Exclusions inherited
+    # from earlier edits still apply, except explicitly requested destinations.
+    for i in changed:
+        day = days[i]
+        day_edit = edits.get(i)
+        day.state.taken = set().union(*(p for j, p in enumerate(owners) if j != i))
+        day.state.rejected_elsewhere = set().union(
+            *(other.state.excluded for j, other in enumerate(days) if j != i)
+        )
+        incoming = [c for target, c in transfers if target == i]
+        _apply_edit(day, PlanEdit(reply="", add_places=[c.place.name for c in incoming]), {})
+        for candidate in incoming:
+            day.state.shortlist[candidate.place.id] = candidate.model_copy(
+                update={"required": True}
+            )
+        outline_update: dict[str, Any] = {"must_include": list(day.state.brief.must_include)}
+        if day_edit and day_edit.theme is not None:
+            outline_update["theme"] = day_edit.theme
+        if day_edit and (day_edit.add_interests or day_edit.remove_interests):
+            outline_update["focus"] = [
+                x.label for x in day.state.brief.interests if x.weight >= 0.7
+            ]
+        updated.outline[i] = updated.outline[i].model_copy(update=outline_update)
+        await stage(_for_day(emit, i), "feedback", "start", "Обновляю день")
+    await stage(emit, "feedback", "done", edit.reply, {"changed_days": changed})
+    facts = traveller_facts(profile, memory or [])
+
+    async def research_day(position: int) -> None:
+        i = changed[position]
+        day_edit = edits.get(i)
+        if day_edit and day_edit.research_goal:
+            await _research(
+                days[i],
+                llm,
+                _for_day(emit, i),
+                goal=day_edit.research_goal,
+                max_steps=FEEDBACK_STEPS,
+                time_budget_s=FEEDBACK_BUDGET_S,
+                facts=facts,
+            )
+        await stage(_for_day(emit, i), "feedback", "done", "Изменения дня применены")
+
+    await _each_day(len(changed), research_day)
+    rebuilt: dict[int, Plan] = {}
+    for i in changed:
+        # Recompute after earlier routes: newly found places must not repeat either.
+        days[i].state.taken = set().union(*(p for j, p in enumerate(owners) if j != i))
+        days[i].state.taken |= _named_elsewhere(days, i)
+        plan = await _build_checked(days[i], llm, _for_day(emit, i), facts)
+        errors = [v.message for v in plan.violations if v.severity == "error"]
+        if errors:
+            raise PipelineError(
+                f"День {i + 1}: {'; '.join(errors)}. Изменения поездки не сохранены."
+            )
+        for target, candidate in transfers:
+            if target == i and not any(
+                candidate.place.id == s.place.id or same_place(candidate.place, s.place)
+                for s in plan.stops
+            ):
+                raise PipelineError(
+                    f"День {i + 1}: не удалось перенести «{candidate.place.name}». "
+                    "Изменения поездки не сохранены."
+                )
+        rebuilt[i] = plan
+        owners[i] = {s.place.id for s in plan.stops}
+
+    seen: list[Place] = []
+    for i, day in enumerate(days):
+        plan = rebuilt.get(i, day.plan)
+        for stop in plan.stops:
+            if any(stop.place.id == place.id or same_place(stop.place, place) for place in seen):
+                raise PipelineError("Место повторяется в поездке. Изменения не сохранены.")
+            seen.append(stop.place)
+
+    await _each_day(
+        len(changed),
+        lambda position: _write(
+            days[changed[position]],
+            llm,
+            _for_day(emit, changed[position]),
+            rebuilt[changed[position]],
+            facts,
+        ),
+    )
+    if len(days) == 1:
+        updated.title = _single_title(days[0])
+    updated.learned = await _learn(llm, emit, req.feedback, profile, memory)
+    return updated, edit.reply, changed
 
 
 async def _brief(

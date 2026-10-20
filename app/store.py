@@ -60,11 +60,12 @@ class MemoryOut(BaseModel):
 
 
 class HistoryEntry(BaseModel):
-    """One run on a journey: the plan of all its days, or feedback on one day."""
+    """One run; old history entries without `days` remain readable."""
 
     at: datetime = Field(default_factory=utcnow)
     kind: Literal["plan", "feedback"]
-    day: int | None = None  # the day feedback changed; None for the plan
+    day: int | None = None  # None for a plan or trip-wide feedback
+    days: list[int] = Field(default_factory=list)  # changed days of trip-wide feedback
     text: str  # the request or the feedback, as the traveller typed it
     reply: str | None = None  # the agent's answer to feedback
     cost_usd: float = 0.0
@@ -349,19 +350,27 @@ class Store:
             s.add_all(days)
 
     async def update_journey(self, user_id: int, journey: Journey, entry: HistoryEntry) -> None:
-        """Save feedback on the day `entry` names: that day's row and the journey's row
-        (the other days did not change)."""
-        if entry.day is None:
-            raise ValueError("feedback names the day it changed")
+        """All affected day rows and history commit in one transaction. Untouched
+        day rows stay as they were, including when a coordinated update fails."""
+        indices = [entry.day] if entry.day is not None else entry.days
+        if (
+            not indices
+            or len(set(indices)) != len(indices)
+            or any(not 0 <= i < len(journey.days) for i in indices)
+        ):
+            raise ValueError("feedback names the days it changed")
         async with self._db.begin() as s:
             row = await self._owned_journey(s, user_id, journey.id)
-            day = await s.scalar(
-                select(DayRow).where(DayRow.journey_id == journey.id, DayRow.day_index == entry.day)
-            )
-            if row is None or day is None:
-                raise LookupError(f"day {entry.day} of journey {journey.id} of user {user_id}")
+            if row is None:
+                raise LookupError(f"journey {journey.id} of user {user_id}")
             _record_journey(row, journey, entry)
-            _record_day(day, journey.days[entry.day])
+            for index in indices:
+                day = await s.scalar(
+                    select(DayRow).where(DayRow.journey_id == journey.id, DayRow.day_index == index)
+                )
+                if day is None:
+                    raise LookupError(f"day {index} of journey {journey.id} of user {user_id}")
+                _record_day(day, journey.days[index])
 
     async def list_journeys(self, user_id: int) -> list[JourneySummary]:
         async with self._db() as s:

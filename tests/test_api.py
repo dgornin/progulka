@@ -64,6 +64,26 @@ class FakePipeline:
         journey.learned = ["Не любит толпы"]
         return journey, "Убрал"
 
+    async def apply_journey_feedback(self, journey, req, llm, emit, profile=None, memory=None):
+        self.calls.append({"journey": journey, "req": req, "memory": memory, "profile": profile})
+        llm.usage.cost_usd += 0.004
+        for i in (0, 1):
+            journey.days[i].plan.title = f"Обновлённый день {i + 1}"
+            await emit(
+                AgentEvent(
+                    type="stage",
+                    data={
+                        "name": "feedback",
+                        "status": "done",
+                        "day": i,
+                    },
+                )
+            )
+        if self.error:
+            raise self.error
+        journey.learned = ["Предпочитает парки"]
+        return journey, "Обновил два дня", [0, 1]
+
 
 def _settings(tmp_path, **changes):
     values = {
@@ -86,6 +106,7 @@ def pipeline(make_journey, monkeypatch):
     fake = FakePipeline(make_journey)
     monkeypatch.setattr(main, "plan_journey", fake.plan_journey)
     monkeypatch.setattr(main, "apply_day_feedback", fake.apply_day_feedback)
+    monkeypatch.setattr(main, "apply_journey_feedback", fake.apply_journey_feedback)
     return fake
 
 
@@ -149,6 +170,62 @@ def _journey_data(response):
 
 def _feedback(client, journey_id="j1", day=0, **body):
     return client.post(f"/api/journeys/{journey_id}/days/{day}/feedback", json=body)
+
+
+def test_trip_feedback_saves_all_changed_days_and_one_history_entry(client, pipeline):
+    _register(client)
+    initial = _journey_data(client.post("/api/plan", json=THREE_DAYS))["journey"]
+    response = client.post(
+        "/api/journeys/j1/feedback", json={"feedback": "Поменяй первые два дня местами"}
+    )
+    data = _journey_data(response)
+    assert data["reply"] == "Обновил два дня"
+    assert data["learned"] == ["Предпочитает парки"]
+    assert data["journey"]["days"][2] == initial["days"][2]
+    saved = client.get("/api/journeys/j1").json()
+    assert saved["journey"] == data["journey"]
+    entry = saved["history"][-1]
+    assert entry["day"] is None and entry["days"] == [0, 1]
+    assert entry["cost_usd"] == 0.004
+    assert len(saved["history"]) == 2
+    assert pipeline.calls[-1]["memory"] == ["Любит конструктивизм"]
+    assert not main.busy_journeys
+
+
+def test_failed_trip_feedback_preserves_all_days_and_history(client, pipeline):
+    _register(client)
+    client.post("/api/plan", json=THREE_DAYS)
+    before = client.get("/api/journeys/j1").json()
+    pipeline.error = main.PipelineError("Второй день не удалось собрать")
+    events = _events(client.post("/api/journeys/j1/feedback", json={"feedback": "Перенеси музеи"}))
+    assert "error" in [e["type"] for e in events]
+    assert "journey" not in [e["type"] for e in events]
+    assert client.get("/api/journeys/j1").json() == before
+    assert not main.busy_journeys
+
+
+@pytest.mark.parametrize("text", ["", "   ", "x" * 1001])
+def test_trip_feedback_refuses_invalid_requests_before_spending_a_run(client, pipeline, text):
+    _register(client)
+    client.post("/api/plan", json=THREE_DAYS)
+    assert client.post("/api/journeys/j1/feedback", json={"feedback": text}).status_code == 422
+    assert len(pipeline.calls) == 1 and not main.busy_journeys
+
+
+def test_trip_feedback_checks_ownership_and_shares_the_day_feedback_lock(client, pipeline):
+    url = "/api/journeys/j1/feedback"
+    body = {"feedback": "Поменяй первые два дня местами"}
+    assert client.post(url, json=body).status_code == 401
+    _register(client)
+    client.post("/api/plan", json=THREE_DAYS)
+    main.busy_journeys.add("j1")
+    assert client.post(url, json=body).status_code == 409
+    assert _feedback(client, feedback="меньше музеев").status_code == 409
+    assert client.delete("/api/journeys/j1").status_code == 409
+    main.busy_journeys.clear()
+    _register(client, "boris@example.com")
+    assert client.post(url, json=body).status_code == 404
+    assert len(pipeline.calls) == 1 and not main.busy_journeys
 
 
 async def _remember(database_url, email, facts):

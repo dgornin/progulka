@@ -364,7 +364,8 @@ function setBusy(busy, kind = null) {
 function beginRun(kind, title, day) {
   state.run = {
     kind,
-    day, // the day a feedback run changes
+    day, // null for feedback on the whole trip
+    changedDays: null,
     // the stop button aborts the request; the server then cancels the run and, for a
     // feedback run, keeps the saved journey as it was, so the routes on screen stay current
     controller: new AbortController(),
@@ -405,7 +406,7 @@ function beginRun(kind, title, day) {
     );
   }
   followLog = true;
-  const what = kind === "plan" ? "Новое путешествие" : several() ? `Пожелание · день ${day + 1}` : "Пожелание";
+  const what = kind === "plan" ? "Новое путешествие" : day === null ? "Пожелание · вся поездка" : several() ? `Пожелание · день ${day + 1}` : "Пожелание";
   addRow("divider", null, null, what, " ", h("q", {}, clip(title, 160)));
   renderStages();
   paintDays();
@@ -515,9 +516,10 @@ function mergedStages() {
 function renderStages() {
   const { stages, kind, over } = state.run;
   let shown;
-  if (kind === "plan" && several()) {
+  if (several() && (kind === "plan" || state.run.day === null)) {
     const status = (name) => (name === "days" ? daysStatus() : stages.get(name));
-    shown = STAGES.filter(([name]) => JOURNEY_STAGES.includes(name) || stages.has(name)).map(([name, label]) => [label, status(name)]);
+    const expected = kind === "plan" ? JOURNEY_STAGES : ["feedback", "days"];
+    shown = STAGES.filter(([name]) => expected.includes(name) || stages.has(name)).map(([name, label]) => [label, status(name)]);
   } else {
     // one day, or a change to one day: the trip's and the day's stages read as one pipeline
     const merged = mergedStages();
@@ -532,7 +534,11 @@ function renderStages() {
 /** Where one day of the running stream is: {status, text}, or null when it is not running. */
 function dayProgress(index) {
   const current = state.run;
-  if (!current || current.over || (current.kind === "feedback" && current.day !== index)) return null;
+  if (!current || current.over) return null;
+  if (current.kind === "feedback") {
+    if (current.day !== null && current.day !== index) return null;
+    if (current.day === null && !current.changedDays?.includes(index) && !current.dayStages.has(index)) return null;
+  }
   const stages = current.dayStages.get(index);
   if (!stages) return { status: "pending", text: state.outline || current.kind === "feedback" ? "в очереди" : "ждёт плана дней" };
   const active = [...stages].filter(([, status]) => status === "active").map(([name]) => name).at(-1);
@@ -550,6 +556,7 @@ function daysStatus() {
 
 function onStage({ name, status, label, detail, day }) {
   const current = state.run;
+  if (name === "feedback" && Array.isArray(detail?.changed_days)) current.changedDays = detail.changed_days;
   const onDay = typeof day === "number";
   if (onDay && !current.dayStages.has(day)) current.dayStages.set(day, new Map());
   const stages = onDay ? current.dayStages.get(day) : current.stages;
@@ -819,7 +826,7 @@ function onJourney({ journey_id: id, journey, usage, reply, learned = [] }) {
   const stopsText = count(stops, "остановка", "остановки", "остановок");
   const text =
     state.run.kind === "feedback"
-      ? `День ${state.run.day + 1} перестроен`
+      ? state.run.day === null ? "Поездка обновлена" : `День ${state.run.day + 1} перестроен`
       : several()
         ? `Путешествие собрано: ${count(journey.days.length, "день", "дня", "дней")}, ${stopsText}, ${walked} пешком`
         : `Маршрут собран: ${stopsText}, ${walked} пешком`;
@@ -1310,12 +1317,12 @@ function showReply(text, day) {
 
 function renderReply() {
   const { reply } = state;
-  const shown = Boolean(reply) && (!several() || state.day === reply.day);
+  const shown = Boolean(reply) && (!several() || reply.day === null || state.day === reply.day);
   ui.reply.replaceChildren(h("b", {}, "Агент: "), shown ? reply.text : "");
   ui.reply.hidden = !shown;
 }
 
-/** The feedback box changes one day: the selected one, or the traveller picks one first. */
+/** The all-days view edits the trip; selecting a day keeps the focused edit flow. */
 function renderFeedbackTarget() {
   if (!state.journey) {
     ui.feedback.hidden = true;
@@ -1323,20 +1330,26 @@ function renderFeedbackTarget() {
   }
   ui.feedback.hidden = false;
   renderReply();
-  const picking = several() && state.day === null;
-  ui.feedbackPick.hidden = !picking;
-  ui.feedbackEdit.hidden = picking;
-  if (picking) {
+  const wholeTrip = several() && state.day === null;
+  ui.feedbackPick.hidden = !several();
+  ui.feedbackEdit.hidden = false;
+  if (several()) {
     ui.feedbackPick.replaceChildren(
-      h("p", { class: "feedback-title" }, "Что изменить? Выберите день"),
       h(
         "div",
         { class: "chips" },
+        h("button", {
+          class: `chip pick-day${wholeTrip ? " is-active" : ""}`,
+          type: "button",
+          "aria-pressed": String(wholeTrip),
+          onclick: () => { selectDay(null); ui.feedbackText.focus(); },
+        }, "Вся поездка"),
         state.journey.days.map((day) =>
           h(
             "button",
             {
-              class: "chip pick-day",
+              class: `chip pick-day${state.day === day.index ? " is-active" : ""}`,
+              "aria-pressed": String(state.day === day.index),
               type: "button",
               onclick: () => {
                 selectDay(day.index);
@@ -1349,10 +1362,14 @@ function renderFeedbackTarget() {
         ),
       ),
     );
-    return;
   }
-  ui.feedbackLabel.textContent = several() ? `Что изменить в дне ${state.day + 1}?` : "Что изменить?";
-  ui.feedbackHint.textContent = several()
+  ui.feedbackLabel.textContent = wholeTrip ? "Что изменить в поездке?" : several() ? `Что изменить в дне ${state.day + 1}?` : "Что изменить?";
+  ui.feedbackText.placeholder = wholeTrip
+    ? "Перенеси парки со второго дня на третий, а музеи — на второй"
+    : "Например: меньше музеев, больше кофе";
+  ui.feedbackHint.textContent = wholeTrip
+    ? "Укажите дни или даты. Все изменения сохранятся вместе после проверки маршрутов. ⌘/Ctrl + Enter — отправить."
+    : several()
     ? "Агент продолжит с того же места и не повторит места других дней. ⌘/Ctrl + Enter — отправить."
     : "Агент продолжит с того же места: найденные места он помнит. ⌘/Ctrl + Enter — отправить.";
 }
@@ -1412,7 +1429,7 @@ function renderHistory(runs, journey) {
   for (const entry of runs) {
     const isPlan = entry.kind === "plan";
     const day = typeof entry.day === "number" ? entry.day : null;
-    const what = isPlan ? (multi ? "Путешествие построено" : "Маршрут построен") : multi && day !== null ? `Правка дня ${day + 1}` : "Правка";
+    const what = isPlan ? (multi ? "Путешествие построено" : "Маршрут построен") : multi && day !== null ? `Правка дня ${day + 1}` : entry.days?.length ? `Правка поездки · дни ${entry.days.map((i) => i + 1).join(", ")}` : "Правка";
     addRow(
       "history",
       badge(isPlan ? "◎" : "✎", isPlan ? "tool-finish" : "tool-shortlist", what),
@@ -1431,7 +1448,7 @@ function renderHistory(runs, journey) {
   if (multi && journey.outline?.length) renderOutline({ title: journey.title, days: journey.outline }, "Дни путешествия");
   if (!multi) renderBrief(journey.days[0].plan.brief, "Сейчас маршрут учитывает");
   const next = multi
-    ? "Выберите день и напишите справа, что в нём изменить: агент продолжит с того же места и не повторит места других дней."
+    ? "Напишите справа, что изменить во всей поездке, или выберите отдельный день."
     : "Напишите, что изменить, справа под маршрутом: агент продолжит с того же места.";
   addRow("note", badge("→", "tool-finish"), null, next);
 }
@@ -1739,8 +1756,11 @@ function renderProfileNote(profile) {
 
 async function sendFeedback(day, feedback, excludeIds = [], title = feedback) {
   if (!state.journeyId || state.busy) return false;
-  const url = `/api/journeys/${encodeURIComponent(state.journeyId)}/days/${day}/feedback`;
-  return run(url, { feedback, exclude_place_ids: excludeIds }, "feedback", title, day);
+  const url = day === null
+    ? `/api/journeys/${encodeURIComponent(state.journeyId)}/feedback`
+    : `/api/journeys/${encodeURIComponent(state.journeyId)}/days/${day}/feedback`;
+  const body = day === null ? { feedback } : { feedback, exclude_place_ids: excludeIds };
+  return run(url, body, "feedback", title, day);
 }
 
 // The button sends only the id, no words: the server removes the stop without asking
@@ -1802,10 +1822,10 @@ ui.feedback.addEventListener("submit", async (e) => {
     return;
   }
   const text = ui.feedbackText.value.trim();
-  if (!text || state.busy || (several() && state.day === null)) return;
+  if (!text || state.busy) return;
   // The wish stays in the box until the day is rebuilt, so a failed attempt is one
   // click to retry; a new wish typed meanwhile is kept too.
-  if ((await sendFeedback(state.day ?? 0, text)) && ui.feedbackText.value.trim() === text) ui.feedbackText.value = "";
+  if ((await sendFeedback(state.day, text)) && ui.feedbackText.value.trim() === text) ui.feedbackText.value = "";
 });
 ui.feedbackText.addEventListener("keydown", submitOnCmdEnter(ui.feedback));
 
