@@ -21,13 +21,16 @@ from eval.run_eval import (
     agent_points,
     avoid_hits,
     baseline_point,
+    check_route,
     harness_answer,
     interest_coverage,
     nominatim_kind,
     planner_outcome,
     popularity_stats,
     repeats_across_days,
+    route_items,
     run_harness,
+    score,
     score_journey,
     stored_reading,
     summary_sections,
@@ -323,11 +326,15 @@ async def test_run_harness_counts_the_chat_answer_and_checks_its_copy_as_the_bas
         ' {"name": "Кунсткамера", "address": null, "arrive": "12:00", "depart": "13:00"}]}',
         {"prompt_tokens": 500, "completion_tokens": 300, "cost": 0.001},
     )
+    items = _answer(
+        '{"items": [{"n": 1, "kind": "place"}, {"n": 2, "kind": "place"}]}',
+        {"prompt_tokens": 200, "completion_tokens": 40, "cost": 0.0002},
+    )
 
     async def call(self: LLM, request: dict, extra_body: dict, timeout: float) -> dict:
         sent.append(request)
         reasoning.append(extra_body.get("reasoning"))
-        return [chat, copy][len(sent) - 1]
+        return [chat, copy, items][len(sent) - 1]
 
     async def get_json(url: str, params: dict[str, Any], **options: Any) -> list[dict]:
         if "featureType" in params:  # the city's bounding box: not needed here
@@ -345,19 +352,30 @@ async def test_run_harness_counts_the_chat_answer_and_checks_its_copy_as_the_bas
     query = {"request": "Петербург, 24 октября, с 11 до 18", "avoid": ["музеи"]}
     base = LLM(client=None, model="anthropic/claude-haiku-5.5")
 
-    metrics, names, answer = await run_harness(
+    metrics, names, answer, details = await run_harness(
         base, "anthropic/claude-opus-5.5", query, brief, GeoPoint(lat=59.93, lon=30.36), "low"
     )
 
     assert sent[0]["model"] == "anthropic/claude-opus-5.5"
     assert sent[0]["tools"] == [HARNESS_SEARCH]
     assert "Today is 2026-10-20" in sent[0]["messages"][0]["content"]
-    assert reasoning == [{"effort": "low"}, {"enabled": False}]  # the copy: the agent's setting
+    # The copy and the kinds of items: the agent's model and setting.
+    assert reasoning == [{"effort": "low"}, {"enabled": False}, {"enabled": False}]
     # The copy into JSON: the agent's model, without the search, given the prose alone.
     assert sent[1]["model"] == "anthropic/claude-haiku-5.5" and "tools" not in sent[1]
     assert sent[1]["messages"][1] == {"role": "user", "content": prose}
     assert (names, answer) == (["Эрмитаж", "Кунсткамера"], prose)
     assert (metrics.stops, metrics.found, metrics.avoid_hits, metrics.mean_pop) == (2, 2, 2, 0.91)
+    assert (metrics.places, metrics.places_found, metrics.vague) == (2, 2, 0)
+    assert details[1] == {
+        "name": "Кунсткамера",
+        "item": "place",
+        "found": True,
+        "lat": 59.93,
+        "lon": 30.36,
+        "arrive": "12:00",
+        "depart": "13:00",
+    }
     # Usage is the chat answer's alone: the copy is the eval's work.
     assert (metrics.llm_calls, metrics.prompt_tokens, metrics.completion_tokens) == (1, 20000, 700)
     assert (metrics.cost_usd, metrics.web_searches, metrics.cited_pages) == (0.03, 3, 0)
@@ -393,6 +411,7 @@ def test_the_summary_compares_every_system_on_the_walks_all_of_them_answered() -
         {"id": "b", "agent": _route(12, 0, 4.0), "baseline": _route(9, 0, 9.0)},
     ]
     tokens = {"prompt_tokens": 20000, "completion_tokens": 1000, "mean_pop": 0.6}
+    tokens |= {"transit_impossible": 0, "places": 5, "places_found": 4, "vague": 1}
     harness = [
         {"id": "a", "model": "h", "harness": _route(6, 1, 7.0, **tokens)},
         {"id": "b", "model": "h", "error": "LLMError: timeout"},
@@ -405,10 +424,13 @@ def test_the_summary_compares_every_system_on_the_walks_all_of_them_answered() -
     ]
     assert all(len(routes) == 1 for _, routes in systems)  # walk "b" failed for the harness
     table = summary_table(systems)
-    # Tokens: — for the runs before they were recorded.
-    assert "| agent, `m` | 1 | 10/10 | 0 | 0 | 0/1 | 5.0 | — | — | 0.01 | 10.0 |" in table
-    assert "| one prompt, `m` | 1 | 6/8 | 0 | 3 | 1/1 | 14.0 | — | — |" in table
-    assert "| chat + web search, `h` | 1 | 6/6 | 0 | 1 | 1/1 | 7.0 | 0.6 | 21000 |" in table
+    # Transit legs, places and tokens: — for the runs before they were measured.
+    assert "| agent, `m` | 1 | 0 (0/1) | — | 0 | — | — | 5.0 | — | — | 0.01 | 10.0 |" in table
+    assert "| one prompt, `m` | 1 | 3 (1/1) | — | 0 | — | — | 14.0 | — | — |" in table
+    assert "| chat + web search, `h` | 1 | 1 (1/1) | 0 (0/1) | 0 | 4/5 (80%) | 1 | 7.0 | 0.6 |" in (
+        table
+    )
+    assert "| 21000 |" in table
     assert summary_systems("m", [], []) == []
 
 
@@ -455,8 +477,61 @@ def test_a_harness_run_keeps_the_rows_of_the_other_models_and_queries(tmp_path) 
     assert "| a | haiku | 7 | 7/7 | 0 | 2 | no | 0 | — | — | 9.0 | 3 | — | 10 | 0.01 | 10.0 |" in md
     assert "| b | haiku | error | LLMError: no choices |" in md
     # Walk b failed for haiku: the summary compares walk a only.
-    assert "| chat + web search, `opus` | 1 | 8/8 | 0 | 0 | 0/1 | 6.0 |" in md
+    assert "| chat + web search, `opus` | 1 | 0 (0/1) | — | 0 | — | — | 6.0 |" in md
 
     write_results(tmp_path, "m", "m", second, [], [], haiku)  # every walk of haiku again
     meta = json.loads((tmp_path / "m.meta.json").read_text())["m-harness.json"]
     assert meta["haiku"] == [second | {"queries": ["a", "b"]}]
+
+
+def _timed(name: str, lat: float, arrive: str, depart: str) -> Point:
+    at, leave = (datetime.combine(DAY, time.fromisoformat(t)) for t in (arrive, depart))
+    return Point(name, None, lat, 30.36, None, at, leave)
+
+
+def test_a_leg_is_too_short_by_transit_when_faster_than_walking_and_10_min_plus_20_kmh() -> None:
+    brief = TripBrief(city="Санкт-Петербург", date=DAY, start_time=time(11), end_time=time(18))
+    start = GeoPoint(lat=59.93, lon=30.36)
+    # About 3.3 km north each (0.03 degrees of latitude), more in the streets: an hour on
+    # foot, under 25 minutes by transit. 10 minutes (+5) is too short for both, 30 for the
+    # walk only; 2 minutes to a stop next door is walked, and no transport is needed.
+    points = [
+        _timed("Далеко", 59.96, "11:10", "11:40"),
+        _timed("Ещё дальше", 59.99, "12:10", "12:30"),
+        _timed("Рядом", 59.9905, "12:32", "12:40"),
+    ]
+    route = check_route(points, start, brief)
+    assert (route.impossible_legs, route.transit_impossible) == (2, 1)
+
+
+def test_found_in_osm_counts_the_specific_places_and_the_rest_are_vague() -> None:
+    brief = TripBrief(city="Санкт-Петербург", date=DAY, start_time=time(11), end_time=time(18))
+    start = GeoPoint(lat=59.93, lon=30.36)
+    found = _timed("Эрмитаж", 59.93, "11:00", "12:00")
+    lost = _timed("Нигде", 59.93, "12:00", "12:10")
+    lost.lat = lost.lon = None
+    transition = _timed("Переход по Невскому", 59.93, "12:10", "12:20")
+    transition.lat = transition.lon = None
+    items = ["place", "place", "transition"]
+    m = score([found, lost, transition], start, brief, [], {}, 1.0, None, None, items)
+    assert (m.found, m.stops, m.places_found, m.places, m.vague) == (1, 3, 1, 2, 1)
+    assert score([found], start, brief, [], {}, 1.0).places is None  # not measured
+
+
+async def test_route_items_ask_once_and_count_a_skipped_item_as_a_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[dict[str, Any]] = []
+
+    async def call(self: LLM, request: dict, extra_body: dict, timeout: float) -> dict:
+        sent.append(request)
+        return _answer('{"items": [{"n": 2, "kind": "endpoint"}]}', {"prompt_tokens": 9})
+
+    monkeypatch.setattr(LLM, "_call_with_retries", call)
+    base = LLM(client=None, model="anthropic/claude-haiku-5.5")
+    assert await route_items(base, ["Эрмитаж", "Завершение маршрута"]) == ["place", "endpoint"]
+    assert len(sent) == 1 and sent[0]["messages"][1]["content"] == (
+        "1. Эрмитаж\n2. Завершение маршрута"
+    )
+    assert base.usage.calls == 0  # the eval's work, not counted to any system
+    assert await route_items(base, []) == []

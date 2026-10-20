@@ -11,9 +11,24 @@ Then both are checked by the same code:
   with coordinates, so this column is full by construction; a baseline stop counts
   when its name is found in OpenStreetMap (Nominatim) inside the city;
 - closed: stops whose known opening hours say "closed" at the planned time;
-- impossible legs: the time between two stops is shorter than the walk itself;
+- impossible legs (on foot): the time between two stops, plus 5 minutes, is shorter than
+  the walk itself; the request asks for a walking route;
+- too short even by transit: the time between two stops, plus the same 5 minutes, is
+  shorter than the faster of the walk and city transport at its best: 10 minutes of
+  overhead (to the stop, the wait, from the stop) plus the street distance at 20 km/h. A
+  chat answer may assume the metro or a taxi between stops, so a leg counted here cannot be
+  explained away by it; every such leg is also an impossible leg on foot;
+- specific places, found in OSM, vague items: one structured call of the agent's model per
+  route (temperature 0, recorded in the LLM replay cache, the same prompt for every
+  system) sorts the items into specific places a visitor can go to and the rest: a
+  transition, an area («окрестности» of a street), an activity without a place («Обед»),
+  the start or end of the route as such, a choice «X или Y». Found in OSM counts the
+  specific places only; vague items are the rest. Without it, "real places" mixes the
+  model's invented places with its items that are no place at all;
 - over window: the plan ends after the requested end time;
 - walk km: street-distance estimate along the planned order;
+- tokens: prompt + completion over every LLM call the system made for the route: the
+  agent's whole pipeline, the one prompt's call, the chat's answer (not the eval's copy);
 - avoid hits: stops that match a phrase of the query's "avoid" (validator.matches_avoid:
   by the place's kind or a word of its name). "avoid" is written by hand from the
   request ("Музеи не надо" -> "музеи"; "big crowds" names no kind of place and is left
@@ -48,7 +63,8 @@ Then both are checked by the same code:
   places off the beaten track should not; the numbers show which the plan did.
 For the agent, located, closed, impossible legs and over window mostly test the code
 around the LLM (sources, optimizer, validator); avoid hits and interests covered test
-the LLM itself.
+the LLM itself. Every row keeps <system>_detail, each item's name, kind of item, whether
+it was found, its coordinates and times, so any number can be checked by hand.
 
 Harness (--harness MODEL, repeatable): a general chat assistant with web search, as a
 traveller gets by typing the request into ChatGPT or Claude with browsing. One request to
@@ -69,7 +85,10 @@ baseline are not rerun and their rows in <model>.json are reused: the brief and 
 from the row, or, for rows written before they were recorded, from an earlier harness row or
 the pipeline's brief step and start point again (the requests name the city, date and
 window, so the new reading is the one the agent was scored against; every harness model is
-scored against one reading). Single walks only, as the baseline.
+scored against one reading). Single walks only, as the baseline. --rescore-harness calls
+no chat: the stored answers (harness_answer) are copied into JSON again by the agent's
+model, as the run did, and checked by the current code; the chat's tokens, cost, seconds
+and searches stay the recorded ones, and the meta notes when the rows were rescored.
 
 Trips of several days: queries with "days". Only the agent runs: the one-prompt
 baseline is a single walk by design, and a baseline for a whole trip would need a
@@ -105,6 +124,7 @@ Usage (from the repo root, needs .env):
     python -m eval.run_eval --model openai/gpt-6-luna --only kazan-history,kazan-3-days
     python -m eval.run_eval --skip-agent --harness anthropic/claude-haiku-5.5 \\
         --harness anthropic/claude-sonnet-5.5   # the agent's walks from eval/results
+    python -m eval.run_eval --rescore-harness   # the stored chat answers, no chat call
 """
 
 import argparse
@@ -117,6 +137,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -138,6 +159,10 @@ NOMINATIM = "https://nominatim.openstreetmap.org/search"
 # A match this far from the walk's start is a namesake elsewhere in the region, not the
 # place the model meant; counting it would inflate the baseline's walking distance.
 MAX_FROM_START_M = 10_000
+# City transport at its best: to the stop, the wait and from the stop, then 20 km/h door to
+# door. A leg shorter than this cannot be made by metro or taxi either.
+TRANSIT_OVERHEAD_MIN = 10
+TRANSIT_M_PER_MIN = 20_000 / 60
 
 
 class BaselineStop(BaseModel):
@@ -150,6 +175,32 @@ class BaselineStop(BaseModel):
 class BaselinePlan(BaseModel):
     stops: list[BaselineStop]
 
+
+ItemKind = Literal["place", "transition", "area", "activity", "endpoint", "alternatives"]
+
+
+class RouteItem(BaseModel):
+    n: int
+    kind: ItemKind
+
+
+class RouteItems(BaseModel):
+    items: list[RouteItem]
+
+
+ITEMS_PROMPT = (
+    "Below are the numbered items of a walking route, each with what the route says of it. "
+    "For every item say what kind of item it is: "
+    "place: one specific place a visitor can find and go to (a building, monument, mural or "
+    "other artwork, museum, church, cafe, restaurant, shop, market, park, garden, bridge, "
+    "square, embankment, named street or courtyard, viewpoint); "
+    "transition: a walk or ride between places; "
+    "area: a district, the surroundings of a street, several places at once; "
+    "activity: something to do without one specific place (lunch, street food, a break); "
+    "endpoint: the start or the end of the route as such; "
+    "alternatives: a choice between places (X or Y). "
+    "Judge the item as written, not whether it exists."
+)
 
 BASELINE_PROMPT = (
     "You are an experienced local guide. Plan a walking route for the request below: "
@@ -199,6 +250,7 @@ class RouteCheck:
     impossible_legs: int
     over_window: bool
     walk_m: float
+    transit_impossible: int = 0
 
 
 @dataclass
@@ -221,6 +273,11 @@ class Metrics:
     completion_tokens: int | None = None
     web_searches: int | None = None  # the harness only: the searches the provider ran
     cited_pages: int | None = None  # the harness only: distinct URLs, when the engine cites
+    # None: rows of runs before these were measured.
+    transit_impossible: int | None = None
+    places: int | None = None  # items that are one specific place
+    places_found: int | None = None  # of them, found (agent: located by construction)
+    vague: int | None = None  # the other items: transitions, areas, activities, endpoints
 
 
 @dataclass
@@ -249,18 +306,23 @@ def check_route(points: list[Point], start: GeoPoint, brief: TripBrief) -> Route
     """What code can check in one day's route: hours, legs, the window, the distance."""
     located = [p for p in points if p.lat is not None]
     closed = sum(is_open(p.opening_hours, p.arrive, p.depart) is False for p in located)
-    impossible, walk_m = 0, 0.0
+    impossible, transit, walk_m = 0, 0, 0.0
     prev: GeoPoint | Point = start
     prev_depart = datetime.combine(brief.date, brief.start_time)
     for p in located:
         meters = street_meters(_geo(prev), _geo(p))
         walk_m += meters
-        if (p.arrive - prev_depart).total_seconds() / 60 + 5 < walk_minutes(meters, brief.pace):
+        allotted = (p.arrive - prev_depart).total_seconds() / 60 + 5
+        walk = walk_minutes(meters, brief.pace)
+        if allotted < walk:
             impossible += 1
+        # A short leg is walked, not ridden: transport helps only where it is faster.
+        if allotted < min(walk, TRANSIT_OVERHEAD_MIN + meters / TRANSIT_M_PER_MIN):
+            transit += 1
         prev, prev_depart = p, p.depart
     end = datetime.combine(brief.date, brief.end_time)
     over = bool(points) and max(p.depart for p in points) > end
-    return RouteCheck(closed, impossible, over, walk_m)
+    return RouteCheck(closed, impossible, over, walk_m, transit)
 
 
 def avoid_hits(points: Sequence[Point], avoid: Sequence[str]) -> int:
@@ -316,10 +378,15 @@ def score(
     seconds: float,
     coverage: tuple[int, int] | None = None,
     popularity: Mapping[str, float] | None = None,
+    items: Sequence[str] | None = None,
 ) -> Metrics:
+    """`items`: the kind of each point (route_items); None leaves places and vague unmeasured."""
     route = check_route(points, start, brief)
     covered, total = coverage or (None, None)
     mean_pop, top_share = popularity_stats(points, popularity or {})
+    places = None
+    if items is not None:
+        places = [p for p, item in zip(points, items, strict=True) if item == "place"]
     return Metrics(
         stops=len(points),
         found=sum(p.lat is not None for p in points),
@@ -337,7 +404,47 @@ def score(
         top_share=top_share,
         prompt_tokens=usage.get("prompt_tokens"),
         completion_tokens=usage.get("completion_tokens"),
+        transit_impossible=route.transit_impossible,
+        places=None if places is None else len(places),
+        places_found=None if places is None else sum(p.lat is not None for p in places),
+        vague=None if places is None else len(points) - len(places),
     )
+
+
+async def route_items(base: LLM, labels: Sequence[str]) -> list[str]:
+    """The kind of each item of a route (ItemKind), one structured call of the agent's model
+    for every system alike. A chat answer lists the start, a transition («... (переход)»),
+    an area («Стрит-арт в окрестностях Лиговского проспекта») or «Завершение маршрута» as
+    stops; not found in OpenStreetMap, they would read as invented places. The answer is
+    recorded in the LLM replay cache, so a rerun of the scoring reads the same kinds. An item
+    the model skipped counts as a place: a miss must not hide a stop that was not found."""
+    if not labels:
+        return []
+    llm = base.for_run()
+    llm.replay = llm.cache_dir is not None
+    numbered = "\n".join(f"{n}. {label}" for n, label in enumerate(labels, 1))
+    answer = await llm.structured(
+        [{"role": "system", "content": ITEMS_PROMPT}, {"role": "user", "content": numbered}],
+        RouteItems,
+    )
+    kinds = {item.n: item.kind for item in answer.items}
+    return [kinds.get(n, "place") for n in range(1, len(labels) + 1)]
+
+
+def stop_details(names: Sequence[str], points: Sequence[Point], items: Sequence[str]) -> list:
+    """Each item as the eval saw it, so any number of the tables can be checked by hand."""
+    return [
+        {
+            "name": name,
+            "item": item,
+            "found": p.lat is not None,
+            "lat": p.lat,
+            "lon": p.lon,
+            "arrive": f"{p.arrive:%H:%M}",
+            "depart": f"{p.depart:%H:%M}",
+        }
+        for name, p, item in zip(names, points, items, strict=True)
+    ]
 
 
 def score_journey(
@@ -444,16 +551,20 @@ async def run_walk(base: LLM, query: dict, row: dict, with_baseline: bool) -> No
     coverage = interest_coverage(plan.stops, plan.brief.interests)
     points = agent_points(plan)
     popularity = await stop_popularity(points)
+    names = [s.place.name for s in plan.stops]
+    items = await route_items(base, [f"{s.place.name}; {s.place.kind}" for s in plan.stops])
     metrics = score(
-        points, plan.start, plan.brief, query["avoid"], usage, seconds, coverage, popularity
+        points, plan.start, plan.brief, query["avoid"], usage, seconds, coverage, popularity, items
     )
     row["brief_avoid"] = plan.brief.avoid
-    row["agent"], row["agent_stops"] = asdict(metrics), [s.place.name for s in plan.stops]
+    row["agent"], row["agent_stops"] = asdict(metrics), names
+    row["agent_detail"] = stop_details(names, points, items)
     # What every system of the row is scored against, for a later --skip-agent run.
     row["brief"], row["start"] = plan.brief.model_dump(mode="json"), plan.start.model_dump()
     if with_baseline:
-        metrics, names = await run_baseline(base, query, plan.brief, plan.start)
+        metrics, names, details = await run_baseline(base, query, plan.brief, plan.start)
         row["baseline"], row["baseline_stops"] = asdict(metrics), names
+        row["baseline_detail"] = details
 
 
 async def run_journey(base: LLM, query: dict, row: dict) -> None:
@@ -468,7 +579,7 @@ async def run_journey(base: LLM, query: dict, row: dict) -> None:
 
 async def run_baseline(
     base: LLM, query: dict, brief: TripBrief, start: GeoPoint
-) -> tuple[Metrics, list[str]]:
+) -> tuple[Metrics, list[str], list[dict]]:
     llm = base.for_run()
     started = clock.monotonic()
     answer = await llm.structured(
@@ -481,16 +592,34 @@ async def run_baseline(
     points = await locate_stops(answer.stops, brief, start)
     # The popularity lookup is the eval's own: seconds stay comparable with earlier runs.
     seconds = clock.monotonic() - started
+    usage = llm.usage.as_dict()
+    return await check_stops(base, answer.stops, points, query, brief, start, usage, seconds)
+
+
+async def check_stops(
+    base: LLM,
+    stops: Sequence[BaselineStop],
+    points: list[Point],
+    query: dict,
+    brief: TripBrief,
+    start: GeoPoint,
+    usage: dict,
+    seconds: float,
+) -> tuple[Metrics, list[str], list[dict]]:
+    """The checks of a plan in the baseline's JSON (the one prompt's, a chat's copy): its
+    metrics, its stop names as written and each stop's details. The kinds of items are
+    judged on the name with the address the model gave, the agent's on the name and kind."""
     popularity = await stop_popularity(points)
-    metrics = score(
-        points, start, brief, query["avoid"], llm.usage.as_dict(), seconds, None, popularity
-    )
-    return metrics, [s.name for s in answer.stops]
+    labels = [f"{s.name}; {s.address}" if s.address else s.name for s in stops]
+    items = await route_items(base, labels)
+    metrics = score(points, start, brief, query["avoid"], usage, seconds, None, popularity, items)
+    names = [s.name for s in stops]
+    return metrics, names, stop_details(names, points, items)
 
 
 async def run_harness(
     base: LLM, model: str, query: dict, brief: TripBrief, start: GeoPoint, reasoning: str
-) -> tuple[Metrics, list[str], str]:
+) -> tuple[Metrics, list[str], str, list[dict]]:
     """A chat answer with web search, copied into the baseline's JSON and checked by the
     baseline's code; the answer is returned too, to be read. LLM.chat returns the parsed
     turn only, and the searches and the citations are in the raw answer, so the call goes
@@ -519,17 +648,41 @@ async def run_harness(
     if raw["choices"][0].get("finish_reason") == "length":
         raise ValueError(f"the answer was cut at {HARNESS_MAX_TOKENS} tokens")
     text, searches, cited = harness_answer(raw)
+    metrics, names, details = await check_answer(
+        base, text, query, brief, start, llm.usage.as_dict(), seconds
+    )
+    metrics.web_searches, metrics.cited_pages = searches, cited
+    return metrics, names, text, details
+
+
+async def check_answer(
+    base: LLM, text: str, query: dict, brief: TripBrief, start: GeoPoint, usage: dict, seconds
+) -> tuple[Metrics, list[str], list[dict]]:
+    """A chat's prose copied into the baseline's JSON by the agent's model and checked by the
+    baseline's code; `usage` and `seconds` are the chat answer's."""
     plan = await base.for_run().structured(
         [{"role": "system", "content": COPY_PROMPT}, {"role": "user", "content": text}],
         BaselinePlan,
     )
     points = await locate_stops(plan.stops, brief, start)
-    popularity = await stop_popularity(points)
-    metrics = score(
-        points, start, brief, query["avoid"], llm.usage.as_dict(), seconds, None, popularity
+    return await check_stops(base, plan.stops, points, query, brief, start, usage, seconds)
+
+
+async def rescore_harness(base: LLM, query: dict, row: dict) -> dict:
+    """A stored chat answer checked again by the current code, without calling the chat: the
+    copy into JSON and the checks are the eval's own work, the chat's usage, seconds and
+    searches stay the recorded ones."""
+    reading = stored_reading(row)
+    if reading is None:
+        raise ValueError(f"the row has no brief and start: {row['id']}")
+    old = row["harness"]
+    usage = {k: old.get(k) for k in ("llm_calls", "cost_usd", "prompt_tokens", "completion_tokens")}
+    metrics, names, details = await check_answer(
+        base, row["harness_answer"], query, *reading, usage, old["seconds"]
     )
-    metrics.web_searches, metrics.cited_pages = searches, cited
-    return metrics, [s.name for s in plan.stops], text
+    metrics.web_searches, metrics.cited_pages = old["web_searches"], old["cited_pages"]
+    rescored = {"harness": asdict(metrics), "harness_stops": names, "harness_detail": details}
+    return row | rescored
 
 
 def harness_answer(raw: Mapping) -> tuple[str, int, int]:
@@ -585,9 +738,11 @@ async def run_harnesses(
     for model in models:
         harness: dict = {"id": query["id"], "model": model, "reasoning": reasoning, **reading}
         try:
-            metrics, names, answer = await run_harness(base, model, query, brief, start, reasoning)
+            metrics, names, answer, details = await run_harness(
+                base, model, query, brief, start, reasoning
+            )
             harness["harness"], harness["harness_stops"] = asdict(metrics), names
-            harness["harness_answer"] = answer
+            harness["harness_answer"], harness["harness_detail"] = answer, details
         except Exception as e:  # one failed model must not lose the others' results
             harness["error"] = f"{type(e).__name__}: {e}"
         print(json.dumps(harness, ensure_ascii=False))
@@ -724,11 +879,25 @@ HARNESS_SECTION = (
 )
 SUMMARY_SECTION = (
     "Summary: every system on the same walks",
-    "Over the single walks every system answered. Sums of stops, closed and impossible legs; "
-    "per-route means of walk km, mean pop (over the routes that have one), tokens (over the "
-    "routes that recorded them: — for runs before tokens were recorded), cost and seconds. "
-    "Seconds are not like for like: the agent's are its whole pipeline, the one prompt's "
-    "include the eval's OpenStreetMap lookups, the chat's are its answer alone.",
+    "Over the single walks every system answered. Too short on foot: legs whose time, plus 5 "
+    "minutes, is shorter than the walk (the request asks for a walking route), and the routes "
+    "with one; too short even by transit: legs whose time, plus 5 minutes, is shorter than "
+    "both the walk and 10 minutes plus the street distance at 20 km/h, which no metro or taxi "
+    "makes. Found in OSM is over the specific "
+    "places only (one call of the agent's model per route sorts the items, the same for every "
+    "system; the agent's stops are source records with coordinates, found by construction); "
+    "vague items are the rest: transitions, areas, activities, the route's start or end, "
+    "«X or Y». Sums of legs and items; per-route means of walk km, mean pop (over the routes "
+    "that have one), tokens (prompt + completion of every LLM call of the system for the "
+    "route; — for runs before tokens were recorded), $ and seconds. Seconds are not like for "
+    "like: the agent's are its whole pipeline, the one prompt's include the eval's "
+    "OpenStreetMap lookups, the chat's are its answer alone.",
+)
+NOT_FOUND_SECTION = (
+    "Chat stops not found in OpenStreetMap",
+    "Per route, the items of the chat answers that the lenient Nominatim lookup did not find, "
+    "with the kind of item: a vague item is not counted against found in OSM. Each item's "
+    "details are harness_detail in the JSON.",
 )
 
 
@@ -877,10 +1046,10 @@ def summary_sections(model: str, walks: list[dict], harness: list[dict]) -> list
 
 def summary_table(systems: list[tuple[str, list]]) -> str:
     lines = [
-        "| system | routes | real places (located) | closed at visit | impossible legs "
-        "| routes with an impossible leg | walk km per route | mean pop | tokens per route "
-        "| cost $ per route | s per route |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| system | routes | too short on foot: legs (routes) | too short even by transit: legs "
+        "(routes) | closed at visit | found in OSM, of specific places | vague items "
+        "| walk km per route | mean pop | tokens per route | $ per route | s per route |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for label, ms in systems:
         n = len(ms)
@@ -889,10 +1058,11 @@ def summary_table(systems: list[tuple[str, list]]) -> str:
         cells = [
             label,
             n,
-            f"{sum(m['found'] for m in ms)}/{sum(m['stops'] for m in ms)}",
+            _legs(ms, "impossible_legs"),
+            _legs(ms, "transit_impossible"),
             sum(m["closed"] for m in ms),
-            sum(m["impossible_legs"] for m in ms),
-            f"{sum(m['impossible_legs'] > 0 for m in ms)}/{n}",
+            _found_places(ms),
+            _sum(ms, "vague"),
             _mean(m["walk_km"] for m in ms),
             round(sum(pops) / len(pops), 2) if pops else "—",
             round(sum(tokens) / len(tokens)) if tokens else "—",
@@ -901,6 +1071,35 @@ def summary_table(systems: list[tuple[str, list]]) -> str:
         ]
         lines.append(_table_row(cells))
     return "\n".join(lines) + "\n"
+
+
+def not_found_table(rows: list[dict]) -> str:
+    """The chat stops the lookup did not find, per route, from harness_detail."""
+    lines = ["| query | model | not found (kind of item) |", "|---|---|---|"]
+    for r in rows:
+        details = r.get("harness_detail", [])
+        missed = [f"{d['name']} ({d['item']})" for d in details if not d["found"]]
+        if missed:
+            lines.append(_table_row([r["id"], r["model"], "; ".join(missed)]))
+    return "\n".join(lines) + "\n"
+
+
+def _legs(ms: list[dict], key: str) -> str:
+    """Legs summed over the routes, and the routes with one; — when a route lacks the count."""
+    if any(m.get(key) is None for m in ms):
+        return "—"
+    return f"{sum(m[key] for m in ms)} ({sum(m[key] > 0 for m in ms)}/{len(ms)})"
+
+
+def _sum(ms: list[dict], key: str) -> int | str:
+    return "—" if any(m.get(key) is None for m in ms) else sum(m[key] for m in ms)
+
+
+def _found_places(ms: list[dict]) -> str:
+    places, found = _sum(ms, "places"), _sum(ms, "places_found")
+    if places == "—" or found == "—":
+        return "—"
+    return f"{found}/{places} ({round(100 * found / places) if places else 0}%)"
 
 
 def _total_tokens(m: dict) -> int | None:
@@ -987,6 +1186,8 @@ def write_results(
         note = note.format(**HARNESS_SEARCH["parameters"])
         sections.append(f"## {heading}\n\n{provenance}. {note}\n\n{harness_table(harness_rows)}")
         sections += summary_sections(model, walk_rows, harness_rows)
+        heading, note = NOT_FOUND_SECTION
+        sections.append(f"## {heading}\n\n{note}\n\n{not_found_table(harness_rows)}")
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
     (out / f"{slug}.md").write_text(
         f"Model: `{model}`, queries anchored at {TODAY.isoformat()}. Avoid hits count stops "
@@ -1029,6 +1230,8 @@ def _harness_run(info: dict, with_queries: bool) -> str:
     note = f"run {info['run_at']}, commit `{info['commit']}`"
     if "reasoning" in info:
         note += f", reasoning {info['reasoning']}"
+    if "rescored_at" in info:
+        note += f", rescored {info['rescored_at']} at commit `{info['rescore_commit']}`"
     return note + (f" ({', '.join(info['queries'])})" if with_queries else "")
 
 
@@ -1055,6 +1258,11 @@ async def main() -> None:
         action="store_true",
         help="run --harness only, reusing the agent's single walks in eval/results",
     )
+    parser.add_argument(
+        "--rescore-harness",
+        action="store_true",
+        help="check the stored chat answers again with the current code; no chat call",
+    )
     args = parser.parse_args()
     if args.skip_agent and not args.harness:
         parser.error("--skip-agent reuses the agent's results for --harness: name a model")
@@ -1072,6 +1280,14 @@ async def main() -> None:
     slug = base.model.replace("/", "__").replace(":", "_")
     if not settings.trip_planner_agent:
         slug += "-noplanner"  # the ablation (see the module docstring): it keeps the planner's
+    run = {
+        "commit": git_commit(),
+        "run_at": datetime.now().astimezone().isoformat(timespec="minutes"),
+        "trip_planner_agent": settings.trip_planner_agent,
+    }
+    if args.rescore_harness:
+        await rescore(base, slug, queries, run)
+        return
     stored: dict[str, dict] = {}
     if args.skip_agent:
         path = HERE / "results" / f"{slug}.json"
@@ -1085,11 +1301,6 @@ async def main() -> None:
             if "brief" in r:
                 stored[r["id"]] = r
         queries = [q for q in queries if q.get("days", 1) == 1]
-    run = {
-        "commit": git_commit(),
-        "run_at": datetime.now().astimezone().isoformat(timespec="minutes"),
-        "trip_planner_agent": settings.trip_planner_agent,
-    }
     walks: list[dict] = []
     journeys: list[dict] = []
     harness: list[dict] = []
@@ -1113,6 +1324,27 @@ async def main() -> None:
             harness += await run_harnesses(base, args.harness, q, row, reasoning)
 
     write_results(HERE / "results", slug, base.model, run, walks, journeys, harness)
+
+
+async def rescore(base: LLM, slug: str, queries: list[dict], run: dict) -> None:
+    """--rescore-harness: the stored rows of the queries, rescored and written under the run
+    that asked the chat (its commit, time and reasoning), noting this run as the rescore."""
+    out = HERE / "results"
+    by_id = {q["id"]: q for q in queries}
+    rows = json.loads((out / f"{slug}-harness.json").read_text())
+    meta = json.loads((out / f"{slug}.meta.json").read_text())
+    rescored = []
+    for row in rows:
+        if row["id"] in by_id and "harness_answer" in row:
+            rescored.append(await rescore_harness(base, by_id[row["id"]], row))
+            print(json.dumps(rescored[-1]["harness"], ensure_ascii=False))
+    note = {"rescored_at": run["run_at"], "rescore_commit": run["commit"]}
+    for name, runs in meta[f"{slug}-harness.json"].items():
+        for info in runs:
+            mine = [r for r in rescored if r["model"] == name and r["id"] in info["queries"]]
+            if mine:
+                chat_run = {k: v for k, v in info.items() if k not in ("queries", "reasoning")}
+                write_results(out, slug, base.model, chat_run | note, [], [], mine)
 
 
 if __name__ == "__main__":

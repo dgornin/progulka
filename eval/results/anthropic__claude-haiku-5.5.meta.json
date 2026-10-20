@@ -1,7 +1,8 @@
 {
   "anthropic__claude-haiku-5.5.json": {
-    "commit": "c620619",
-    "run_at": "2026-10-20T19:26+03:00",
+    "commit": "55dab95+dirty",
+    "run_at": "2026-10-20T22:42+03:00",
+    "trip_planner_agent": true,
     "queries": [
       "spb-constructivism",
       "spb-classic-kids",
@@ -29,6 +30,8 @@
       {
         "commit": "9bb00f7+dirty",
         "run_at": "2026-10-20T20:54+03:00",
+        "rescored_at": "2026-10-20T22:42+03:00",
+        "rescore_commit": "55dab95+dirty",
         "reasoning": "off",
         "queries": [
           "spb-constructivism",
@@ -46,6 +49,8 @@
       {
         "commit": "9bb00f7+dirty",
         "run_at": "2026-10-20T21:02+03:00",
+        "rescored_at": "2026-10-20T22:42+03:00",
+        "rescore_commit": "55dab95+dirty",
         "reasoning": "default",
         "queries": [
           "spb-constructivism",
