@@ -404,7 +404,9 @@ def _at(brief: TripBrief, hhmm: str) -> datetime:
 def git_commit() -> str:
     """The commit the code ran at, "+dirty" when tracked files differ from it: a result
     can be reproduced only with the code that produced it. Untracked files do not count:
-    a new module matters only once a tracked file imports it, and that file differs."""
+    a new module matters only once a tracked file imports it, and that file differs. Nor
+    do the results themselves: a run of the trips after a run of the walks would
+    otherwise call its own code dirty."""
 
     def git(*args: str) -> str:
         done = subprocess.run(["git", *args], cwd=HERE, capture_output=True, text=True, check=True)
@@ -412,7 +414,14 @@ def git_commit() -> str:
 
     try:
         commit = git("rev-parse", "--short", "HEAD")
-        dirty = git("status", "--porcelain", "--untracked-files=no")
+        dirty = git(
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--",
+            ":(top)",
+            ":(top,exclude)eval/results",
+        )
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
     return commit + ("+dirty" if dirty else "")
