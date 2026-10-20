@@ -241,6 +241,33 @@ function sourceLink(place) {
   return h("a", { class: "source", href: place.url, target: "_blank", rel: "noopener noreferrer" }, `${label} ↗`);
 }
 
+// Russia and its neighbours, roughly, where Yandex Maps knows places better than Google:
+// the Kaliningrad exclave, everything north of Turkey and east of the Baltic capitals up to
+// Kazakhstan, Siberia north of Mongolia and China, and Primorye. Elsewhere Google comes first.
+const yandexFirst = ({ lat, lon }) =>
+  (lat >= 54.2 && lat <= 55.4 && lon >= 19.5 && lon <= 23) ||
+  (lat >= 41.2 && lon >= 27 && lon < 87) ||
+  (lat >= 49 && lon >= 87) ||
+  (lat >= 42.3 && lat < 49 && lon >= 130 && lon <= 139);
+
+/**
+ * The place in Yandex Maps and Google Maps, for reviews, photos and «как пройти». Both are
+ * plain links, no API and no key: each opens a search for the name around the point, which
+ * lands on the place's card when the service knows it (a cafe, a museum) and on the spot
+ * otherwise (an embankment, a mural). Both always, the local favourite first.
+ */
+function mapLinks(place) {
+  const name = encodeURIComponent(place.name);
+  const yandex = ["Яндекс Карты", `https://yandex.ru/maps/?ll=${place.lon},${place.lat}&z=17&text=${name}`];
+  const google = ["Google Maps", `https://www.google.com/maps/search/${name}/@${place.lat},${place.lon},17z`];
+  return (yandexFirst(place) ? [yandex, google] : [google, yandex]).map(([label, href]) =>
+    h("a", { class: "source map-link", href, target: "_blank", rel: "noopener noreferrer" }, `${label} ↗`),
+  );
+}
+
+/** Where the place comes from and where to look it up: one row under a stop. */
+const placeLinks = (place) => h("span", { class: "place-links" }, sourceLink(place), mapLinks(place));
+
 function violationItem(v) {
   return h("li", { class: `violation is-${v.severity}` }, h("b", {}, VIOLATIONS[v.code] ?? v.code), " ", v.message);
 }
@@ -851,7 +878,7 @@ function popupContent(stop, index, day) {
     h("p", { class: "popup-meta" }, meta.filter((part) => part !== null).join(" · ")),
     h("h3", {}, place.name),
     h("p", {}, clip(stop.blurb || stop.reason, 240)),
-    sourceLink(place),
+    placeLinks(place),
   );
 }
 
@@ -1111,7 +1138,7 @@ function stopItem(stop, index, violations, day) {
       h(
         "div",
         { class: "stop-foot" },
-        sourceLink(place),
+        placeLinks(place),
         h(
           "button",
           {

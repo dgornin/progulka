@@ -1157,6 +1157,7 @@ button.tune-chip { min-height: 34px; padding: 4px 12px; font-size: 0.88rem; }
 .source { font-size: 0.86rem; font-weight: 500; text-decoration: none; }
 a.source:hover { text-decoration: underline; }
 span.source { color: var(--muted); }
+.place-links { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; min-width: 0; }
 
 .remove {
   padding: 4px 12px;

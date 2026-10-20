@@ -65,6 +65,15 @@ def test_no_script_turns_a_string_into_markup():
         assert not unsafe.search(path.read_text()), path
 
 
+def test_every_link_to_another_site_cuts_the_opener():
+    # Sources and the map services are other sites: a tab they open must not get
+    # window.opener back to the planner, where the traveller is logged in.
+    for path in (STATIC / "js").glob("*.js"):
+        for line in path.read_text().splitlines():
+            if 'target: "_blank"' in line:
+                assert 'rel: "noopener noreferrer"' in line, (path.name, line.strip())
+
+
 def test_planner_scripts_call_and_link_only_routes_the_server_has():
     paths = {
         path
