@@ -2,144 +2,93 @@
   {
     "id": "spb-constructivism",
     "model": "openai/gpt-6-luna",
+    "brief_avoid": [
+      "музеи"
+    ],
     "agent": {
-      "stops": 10,
-      "found": 10,
+      "stops": 7,
+      "found": 7,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 9.8,
+      "walk_km": 8.6,
+      "avoid_hits": 0,
+      "interests_covered": 3,
+      "interests_total": 3,
       "llm_calls": 16,
-      "cost_usd": 0.0035,
-      "seconds": 66.0
+      "cost_usd": 0.0034,
+      "seconds": 44.7
     },
     "agent_stops": [
       "Туристы",
-      "BackYard",
-      "B.B. King",
       "Карета",
-      "Михаил Горшенёв",
       "Abbey Road",
-      "Кузнечный рынок",
+      "Михаил Горшенёв",
       "Дом-коммуна инженеров и писателей",
-      "Пышечная на Большой Конюшенной",
-      "Дом политкаторжан"
-    ],
-    "baseline": {
-      "stops": 9,
-      "found": 9,
-      "closed": 0,
-      "impossible_legs": 5,
-      "over_window": false,
-      "walk_km": 21.6,
-      "llm_calls": 1,
-      "cost_usd": 0.0002,
-      "seconds": 22.9
-    },
-    "baseline_stops": [
-      "Московский вокзал — старт",
-      "Улица Боровая — стрит-арт и дворовые росписи",
-      "Дом-коммуна инженеров и писателей («Слеза социализма»)",
-      "Улица Рубинштейна — уличная еда и обед",
-      "Круглый дом",
-      "Дом культуры имени Первой пятилетки (ДК имени Ленсовета)",
-      "Дом политкаторжан",
-      "Лофт-проект «Этажи» — стрит-арт и перекус",
-      "Московский вокзал — финиш"
+      "«Василеостровский Рынок»",
+      "Водонапорная башня завода «Красный гвоздильщик»"
     ]
   },
   {
     "id": "kazan-history",
     "model": "openai/gpt-6-luna",
+    "brief_avoid": [],
     "agent": {
-      "stops": 11,
-      "found": 11,
+      "stops": 10,
+      "found": 10,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 4.8,
+      "walk_km": 5.8,
+      "avoid_hits": 0,
+      "interests_covered": 4,
+      "interests_total": 4,
       "llm_calls": 16,
-      "cost_usd": 0.0043,
-      "seconds": 59.2
+      "cost_usd": 0.0038,
+      "seconds": 57.1
     },
     "agent_stops": [
+      "Никольский кафедральный собор",
       "Кул-Шариф",
-      "Башня Сююмбике",
       "Благовещенский собор",
+      "Авылым",
       "Церковь Параскевы Пятницы",
-      "Спасо-Преображенский собор",
-      "Никольский собор (Казань)",
       "Петропавловский собор",
       "Дом татарской кулинарии",
-      "Султановская мечеть",
       "Мечеть Нурулла",
-      "Мечеть аль-Марджани"
-    ],
-    "baseline": {
-      "stops": 10,
-      "found": 10,
-      "closed": 1,
-      "impossible_legs": 7,
-      "over_window": false,
-      "walk_km": 31.2,
-      "llm_calls": 1,
-      "cost_usd": 0.0003,
-      "seconds": 12.2
-    },
-    "baseline_stops": [
-      "Казанский Кремль: Спасская башня и прогулка по территории",
-      "Мечеть Кул-Шариф",
-      "Благовещенский собор",
-      "Музей истории Благовещенского собора",
-      "Улица Баумана — прогулка к Старо-Татарской слободе",
-      "Обед: ресторан татарской кухни «Дом татарской кулинарии»",
-      "Мечеть Марджани",
-      "Старо-Татарская слобода и озеро Кабан",
-      "Петропавловский собор",
-      "Национальный музей Республики Татарстан"
+      "Галеевская мечеть",
+      "Султановская мечеть"
     ]
   },
   {
     "id": "paris-impressionism",
     "model": "openai/gpt-6-luna",
+    "brief_avoid": [
+      "big crowds",
+      "churches"
+    ],
     "agent": {
-      "stops": 5,
-      "found": 5,
+      "stops": 7,
+      "found": 7,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 6.5,
+      "walk_km": 8.7,
+      "avoid_hits": 0,
+      "interests_covered": 3,
+      "interests_total": 3,
       "llm_calls": 16,
       "cost_usd": 0.003,
-      "seconds": 48.1
+      "seconds": 44.5
     },
     "agent_stops": [
-      "Musée de l'Orangerie",
-      "Jeu de Paume",
-      "Fontaine Haussmann",
+      "Petit Palais, Musée des beaux-arts de la Ville de Paris",
       "Ladurée",
-      "La Boulangerie des Invalides"
-    ],
-    "baseline": {
-      "stops": 8,
-      "found": 8,
-      "closed": 2,
-      "impossible_legs": 3,
-      "over_window": false,
-      "walk_km": 10.2,
-      "llm_calls": 1,
-      "cost_usd": 0.0002,
-      "seconds": 14.5
-    },
-    "baseline_stops": [
-      "Place de la Concorde",
-      "Musée de l’Orangerie",
-      "Walk through the Tuileries Garden",
-      "Librairie Galignani",
-      "Du Pain et des Idées",
-      "Shakespeare and Company",
-      "Bouquinistes along the Seine, Quai de Montebello",
-      "Musée d’Orsay"
+      "Fontaine Haussmann",
+      "Jeu de Paume",
+      "Musée de l'Orangerie",
+      "Ladurée",
+      "Stohrer"
     ]
   }
 ]

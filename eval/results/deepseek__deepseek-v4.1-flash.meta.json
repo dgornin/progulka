@@ -1,0 +1,11 @@
+{
+  "deepseek__deepseek-v4.1-flash.json": {
+    "commit": "fdacd35",
+    "run_at": "2026-10-20T15:10+03:00",
+    "queries": [
+      "spb-constructivism",
+      "kazan-history",
+      "paris-impressionism"
+    ]
+  }
+}

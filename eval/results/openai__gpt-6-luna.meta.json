@@ -1,0 +1,11 @@
+{
+  "openai__gpt-6-luna.json": {
+    "commit": "fdacd35",
+    "run_at": "2026-10-20T15:14+03:00",
+    "queries": [
+      "spb-constructivism",
+      "kazan-history",
+      "paris-impressionism"
+    ]
+  }
+}
