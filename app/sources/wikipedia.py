@@ -87,17 +87,27 @@ async def page_extract(place_id: str, max_chars: int = 1500) -> str | None:
     return _shorten(text, max_chars) if text else None
 
 
-async def query_mediawiki(api_url: str, params: dict[str, Any]) -> dict:
-    """One MediaWiki API request (Wikipedia and Wikivoyage).
+async def query_mediawiki(
+    api_url: str, params: dict[str, Any], *, timeout_s: float | None = None, attempts: int = 3
+) -> dict:
+    """One MediaWiki API request (Wikipedia, Wikivoyage, Wikidata).
 
     MediaWiki reports its errors with HTTP 200 ("search is currently too busy"). Read
     as a payload, such an answer is "nothing found", and cached it would stay that for
     a week; as a SourceError it is a tool error the agent sees, and it is not cached.
+    Its status is the 200 it came with: the host answered, so a caller with a breaker
+    (app/sources/wikidata.py) does not take it for an outage.
     """
-    payload = await http.get_json(api_url, params, cacheable=lambda p: "error" not in p)
+    payload = await http.get_json(
+        api_url,
+        params,
+        timeout_s=timeout_s,
+        attempts=attempts,
+        cacheable=lambda p: "error" not in p,
+    )
     if "error" in payload:
         info = payload["error"].get("info", "API error")
-        raise SourceError(f"{urlparse(api_url).netloc}: {info}")
+        raise SourceError(f"{urlparse(api_url).netloc}: {info}", 200)
     return payload
 
 

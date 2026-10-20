@@ -13,6 +13,9 @@ mural, and gets a generated title.
 Ranking: places with a Wikipedia/Wikidata link (notable) first, then by distance.
 Each category is ranked separately and the lists are interleaved, so a dense
 category (cafes) does not crowd out a sparse one (museums) in the same request.
+This only decides which places make the cut; the research tool then orders them by
+popularity and distance (app/agent/tools.py), and the link is what gives a place a
+popularity at all.
 """
 
 import math

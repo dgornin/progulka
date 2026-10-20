@@ -33,7 +33,19 @@ Then both are checked by the same code:
   labels are the research agent's claims, so this says whether the plan addresses
   every wish the LLM heard, not whether the places really fit. The baseline has no
   per-stop labels and is not measured ("—"); an LLM-as-judge for both systems, checked
-  against hand labels, is planned for the final.
+  against hand labels, is planned for the final;
+- mean pop, top share: how well known the stops are, on the absolute 0..1 scale of
+  app/sources/wikidata.py (Wikipedia page views and language versions). Mean pop is over
+  the stops that have a score, top share counts the stops with pop >= wikidata.TOP among
+  the stops whose popularity is known: scored, or without a Wikidata id (not a must-see).
+  A stop whose id the lookup failed to score is left out, and when no stop with an id
+  is scored both are "—": a failed lookup is unknown, not "no must-sees". Both systems
+  are scored by the same lookup of the same Wikidata ids: an agent stop carries the id
+  of its source record (OSM, Wikipedia, Wikivoyage), a baseline stop the one of its
+  Nominatim hit by name (the OSM wikidata tag in extratags), so a baseline stop that is
+  not found, found only by its address, or whose OSM object has no id, has no score. Neither
+  is better the higher: a first visit should include a city's must-sees, a request for
+  places off the beaten track should not; the numbers show which the plan did.
 For the agent, located, closed, impossible legs and over window mostly test the code
 around the LLM (sources, optimizer, validator); avoid hits and interests covered test
 the LLM itself.
@@ -49,7 +61,7 @@ prompt of its own, so comparing with it would measure that prompt. Per trip:
 - repeats: pairs of stops on different days that are one place (the same id, or
   tools.same_place: one Wikidata/Wikipedia link, or one name nearby across sources).
   The pipeline's choice of stops is built to keep it at 0;
-- avoid hits and interests covered, as above, over the whole trip;
+- avoid hits, interests covered, mean pop and top share, as above, over the whole trip;
 - LLM calls, cost and seconds of the whole trip.
 
 Results, per model: eval/results/<model>.json (single walks; the slide deck reads its
@@ -70,7 +82,7 @@ import json
 import re
 import subprocess
 import time as clock
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -85,7 +97,7 @@ from app.pipeline import Journey, PlanRequest, plan_journey
 from app.planning.geo import haversine_m, street_meters, walk_minutes
 from app.planning.hours import is_open
 from app.planning.validator import matches_avoid, uncovered_interests
-from app.sources import geocode, osm
+from app.sources import geocode, osm, wikidata
 from app.sources.http import SourceError, http
 
 HERE = Path(__file__).parent
@@ -126,6 +138,7 @@ class Point:
     opening_hours: str | None
     arrive: datetime
     depart: datetime
+    wikidata: str | None = None  # the Wikidata id, for popularity
 
 
 @dataclass
@@ -150,6 +163,8 @@ class Metrics:
     llm_calls: int
     cost_usd: float
     seconds: float
+    mean_pop: float | None = None  # None: no stop has a score
+    top_share: float | None = None  # None: no stops, or no stop with an id was scored
 
 
 @dataclass
@@ -168,6 +183,8 @@ class JourneyMetrics:
     llm_calls: int
     cost_usd: float
     seconds: float
+    mean_pop: float | None = None
+    top_share: float | None = None
 
 
 def check_route(points: list[Point], start: GeoPoint, brief: TripBrief) -> RouteCheck:
@@ -199,6 +216,27 @@ def interest_coverage(stops: Sequence[Stop], interests: Sequence[Interest]) -> t
     return len(interests) - len(uncovered_interests(stops, interests)), len(interests)
 
 
+async def stop_popularity(points: Iterable[Point]) -> dict[str, float]:
+    """Wikidata id -> popularity, for the stops' ids that could be scored."""
+    return await wikidata.scores(p.wikidata for p in points if p.wikidata)
+
+
+def popularity_stats(
+    points: Sequence[Point], popularity: Mapping[str, float]
+) -> tuple[float | None, float | None]:
+    """(mean pop over the stops with a score, share of pop >= TOP among the stops whose
+    popularity is known). A stop without an id is known not to be a must-see; one whose id
+    could not be scored is unknown and left out, so a failed lookup on one side of the
+    comparison does not read as a plan without must-sees."""
+    known = [popularity[p.wikidata] for p in points if p.wikidata in popularity]
+    mean = round(sum(known) / len(known), 2) if known else None
+    if not known and any(p.wikidata for p in points):
+        return mean, None
+    counted = len(known) + sum(not p.wikidata for p in points)
+    top = sum(pop >= wikidata.TOP for pop in known)
+    return mean, round(top / counted, 2) if counted else None
+
+
 def repeats_across_days(days: Sequence[Sequence[Place]]) -> int:
     """Pairs of stops on different days that are one place. same_place compares only
     records from different sources, so the same id is checked on its own."""
@@ -219,9 +257,11 @@ def score(
     usage: dict,
     seconds: float,
     coverage: tuple[int, int] | None = None,
+    popularity: Mapping[str, float] | None = None,
 ) -> Metrics:
     route = check_route(points, start, brief)
     covered, total = coverage or (None, None)
+    mean_pop, top_share = popularity_stats(points, popularity or {})
     return Metrics(
         stops=len(points),
         found=sum(p.lat is not None for p in points),
@@ -235,17 +275,25 @@ def score(
         llm_calls=usage.get("llm_calls", 0),
         cost_usd=round(usage.get("cost_usd", 0.0), 4),
         seconds=round(seconds, 1),
+        mean_pop=mean_pop,
+        top_share=top_share,
     )
 
 
 def score_journey(
-    journey: Journey, days_requested: int, avoid: Sequence[str], usage: dict, seconds: float
+    journey: Journey,
+    days_requested: int,
+    avoid: Sequence[str],
+    usage: dict,
+    seconds: float,
+    popularity: Mapping[str, float] | None = None,
 ) -> JourneyMetrics:
     """Each day is checked against its own brief (its date), the interests against the
     whole trip's: a wish is served if any day serves it."""
     plans = [day.plan for day in journey.days if day.plan]
     routes = [check_route(agent_points(p), p.start, p.brief) for p in plans]
     covered, total = interest_coverage([s for p in plans for s in p.stops], journey.brief.interests)
+    mean_pop, top_share = popularity_stats(journey_points(journey), popularity or {})
     return JourneyMetrics(
         days_requested=days_requested,
         days_planned=len(plans),
@@ -261,6 +309,8 @@ def score_journey(
         llm_calls=usage.get("llm_calls", 0),
         cost_usd=round(usage.get("cost_usd", 0.0), 4),
         seconds=round(seconds, 1),
+        mean_pop=mean_pop,
+        top_share=top_share,
     )
 
 
@@ -274,9 +324,14 @@ def agent_points(plan: Plan) -> list[Point]:
             s.place.opening_hours,
             s.arrive,
             s.depart,
+            s.place.tags.get("wikidata"),
         )
         for s in plan.stops
     ]
+
+
+def journey_points(journey: Journey) -> list[Point]:
+    return [pt for day in journey.days if day.plan for pt in agent_points(day.plan)]
 
 
 def _geo(p: GeoPoint | Point) -> GeoPoint:
@@ -300,8 +355,10 @@ async def run_walk(base: LLM, query: dict, row: dict, with_baseline: bool) -> No
     journey, usage, seconds = await plan_with_agent(base, query["request"])
     plan = journey.days[0].plan
     coverage = interest_coverage(plan.stops, plan.brief.interests)
+    points = agent_points(plan)
+    popularity = await stop_popularity(points)
     metrics = score(
-        agent_points(plan), plan.start, plan.brief, query["avoid"], usage, seconds, coverage
+        points, plan.start, plan.brief, query["avoid"], usage, seconds, coverage, popularity
     )
     row["brief_avoid"] = plan.brief.avoid
     row["agent"], row["agent_stops"] = asdict(metrics), [s.place.name for s in plan.stops]
@@ -312,7 +369,8 @@ async def run_walk(base: LLM, query: dict, row: dict, with_baseline: bool) -> No
 
 async def run_journey(base: LLM, query: dict, row: dict) -> None:
     journey, usage, seconds = await plan_with_agent(base, query["request"])
-    metrics = score_journey(journey, query["days"], query["avoid"], usage, seconds)
+    popularity = await stop_popularity(journey_points(journey))
+    metrics = score_journey(journey, query["days"], query["avoid"], usage, seconds, popularity)
     row["brief_avoid"] = journey.brief.avoid
     row["agent"] = asdict(metrics)
     row["agent_stops"] = [[s.place.name for s in d.plan.stops] for d in journey.days if d.plan]
@@ -335,8 +393,11 @@ async def run_baseline(
     for stop in answer.stops:
         hit = await _locate(stop, brief.city, city.bbox if city else None, start)
         points.append(baseline_point(stop, hit, brief))
+    # The popularity lookup is the eval's own: seconds stay comparable with earlier runs.
+    seconds = clock.monotonic() - started
+    popularity = await stop_popularity(points)
     metrics = score(
-        points, start, brief, query["avoid"], llm.usage.as_dict(), clock.monotonic() - started
+        points, start, brief, query["avoid"], llm.usage.as_dict(), seconds, None, popularity
     )
     return metrics, [s.name for s in answer.stops]
 
@@ -347,6 +408,10 @@ async def _locate(stop: BaselineStop, city: str, bbox, start: GeoPoint) -> dict 
     Deliberately lenient, so the comparison does not favour the agent: the name as
     written, the name without quotes and parenthesised remarks, then the address the
     model gave. The first hit inside the city and within 10 km of the start counts.
+    extratags bring the hit's OSM tags: opening hours, the kind, and the Wikidata id the
+    popularity columns score. A hit by the address alone drops that id: the address
+    without a house number finds the street («Кронверкский пр.»), and its fame is not
+    the stop's.
     """
     queries = [stop.name, _plain_name(stop.name), stop.address]
     for query in dict.fromkeys(q for q in queries if q):
@@ -362,6 +427,9 @@ async def _locate(stop: BaselineStop, city: str, bbox, start: GeoPoint) -> dict 
             hit = found[0]
             lat, lon = float(hit["lat"]), float(hit["lon"])
             if haversine_m(start.lat, start.lon, lat, lon) <= MAX_FROM_START_M:
+                if query not in (stop.name, _plain_name(stop.name)):
+                    extra = (hit.get("extratags") or {}).items()
+                    hit = hit | {"extratags": {k: v for k, v in extra if k != "wikidata"}}
                 return hit
     return None
 
@@ -374,9 +442,10 @@ def baseline_point(stop: BaselineStop, hit: dict | None, brief: TripBrief) -> Po
     arrive, depart = _at(brief, stop.arrive), _at(brief, stop.depart)
     if hit is None:
         return Point(name, None, None, None, None, arrive, depart)
-    hours = (hit.get("extratags") or {}).get("opening_hours")
+    extra = hit.get("extratags") or {}
     lat, lon = float(hit["lat"]), float(hit["lon"])
-    return Point(name, nominatim_kind(hit), lat, lon, hours, arrive, depart)
+    hours, qid = extra.get("opening_hours"), extra.get("wikidata")
+    return Point(name, nominatim_kind(hit), lat, lon, hours, arrive, depart, qid)
 
 
 def nominatim_kind(hit: dict) -> str | None:
@@ -444,8 +513,9 @@ JOURNEYS_SECTION = (
 def walks_table(rows: list[dict]) -> str:
     lines = [
         "| query | system | stops | real places (located) | closed at visit | impossible legs "
-        "| over window | avoid hits | interests covered | walk km | LLM calls | cost $ | s |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| over window | avoid hits | interests covered | mean pop | top share | walk km "
+        "| LLM calls | cost $ | s |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         for system in ("agent", "baseline"):
@@ -461,6 +531,7 @@ def walks_table(rows: list[dict]) -> str:
                     "yes" if m["over_window"] else "no",
                     m.get("avoid_hits", "—"),  # rows of runs before the column existed
                     _interests(m),
+                    *_popularity(m),
                     m["walk_km"],
                     m["llm_calls"],
                     m["cost_usd"],
@@ -474,9 +545,9 @@ def walks_table(rows: list[dict]) -> str:
 def journeys_table(rows: list[dict]) -> str:
     lines = [
         "| query | days (planned/requested) | stops per day | closed at visit | impossible legs "
-        "| days over window | repeats across days | avoid hits | interests covered | walk km "
-        "| LLM calls | cost $ | s |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| days over window | repeats across days | avoid hits | interests covered | mean pop "
+        "| top share | walk km | LLM calls | cost $ | s |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         m = r.get("agent")
@@ -491,6 +562,7 @@ def journeys_table(rows: list[dict]) -> str:
                 m["repeats"],
                 m["avoid_hits"],
                 _interests(m),
+                *_popularity(m),
                 m["walk_km"],
                 m["llm_calls"],
                 m["cost_usd"],
@@ -504,6 +576,11 @@ def journeys_table(rows: list[dict]) -> str:
 def _interests(m: dict) -> str:
     covered = m.get("interests_covered")
     return "—" if covered is None else f"{covered}/{m['interests_total']}"
+
+
+def _popularity(m: dict) -> list:
+    """Mean pop and top share; "—" when unknown, as in rows of runs before the columns."""
+    return ["—" if m.get(key) is None else m[key] for key in ("mean_pop", "top_share")]
 
 
 def _error_rows(row: dict) -> list[str]:
@@ -549,7 +626,11 @@ def write_results(
     (out / f"{slug}.md").write_text(
         f"Model: `{model}`, queries anchored at {TODAY.isoformat()}. Avoid hits count stops "
         "matching the hand-written avoid of the query (eval/queries.json); the agent's "
-        "parsed one is brief_avoid in the JSON.\n\n" + "\n".join(sections)
+        "parsed one is brief_avoid in the JSON. Mean pop is the mean popularity (0..1: "
+        "Wikipedia page views and language versions) of the stops that have one; top share "
+        f"is the share of stops with pop >= {wikidata.TOP} among those whose popularity is "
+        "known (scored, or without a Wikidata id); — when the lookup failed.\n\n"
+        + "\n".join(sections)
     )
 
 

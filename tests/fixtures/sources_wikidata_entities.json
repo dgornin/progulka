@@ -1,0 +1,458 @@
+{
+ "entities": {
+  "Q132783": {
+   "type": "item",
+   "id": "Q132783",
+   "sitelinks": {
+    "abwiki": {
+     "site": "abwiki",
+     "title": "Ермитаж",
+     "badges": []
+    },
+    "afwiki": {
+     "site": "afwiki",
+     "title": "Hermitage",
+     "badges": []
+    },
+    "arwiki": {
+     "site": "arwiki",
+     "title": "متحف أرميتاج",
+     "badges": []
+    },
+    "arzwiki": {
+     "site": "arzwiki",
+     "title": "متحف الهيرميتاج",
+     "badges": []
+    },
+    "astwiki": {
+     "site": "astwiki",
+     "title": "Muséu del Hermitage",
+     "badges": []
+    },
+    "azwiki": {
+     "site": "azwiki",
+     "title": "Ermitaj",
+     "badges": []
+    },
+    "be_x_oldwiki": {
+     "site": "be_x_oldwiki",
+     "title": "Эрмітаж",
+     "badges": []
+    },
+    "bewiki": {
+     "site": "bewiki",
+     "title": "Эрмітаж",
+     "badges": []
+    },
+    "bgwiki": {
+     "site": "bgwiki",
+     "title": "Ермитаж",
+     "badges": []
+    },
+    "bnwiki": {
+     "site": "bnwiki",
+     "title": "হার্মিটেজ জাদুঘর",
+     "badges": []
+    },
+    "brwiki": {
+     "site": "brwiki",
+     "title": "Mirdi ar Peniti",
+     "badges": []
+    },
+    "bswiki": {
+     "site": "bswiki",
+     "title": "Ermitaž",
+     "badges": []
+    },
+    "cawiki": {
+     "site": "cawiki",
+     "title": "Hermitage",
+     "badges": []
+    },
+    "cewiki": {
+     "site": "cewiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "commonswiki": {
+     "site": "commonswiki",
+     "title": "Государственный Эрмитаж",
+     "badges": []
+    },
+    "cswiki": {
+     "site": "cswiki",
+     "title": "Ermitáž",
+     "badges": []
+    },
+    "cvwiki": {
+     "site": "cvwiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "dawiki": {
+     "site": "dawiki",
+     "title": "Eremitagen (Sankt Petersborg)",
+     "badges": []
+    },
+    "dewiki": {
+     "site": "dewiki",
+     "title": "Eremitage (Sankt Petersburg)",
+     "badges": [
+      "Q17437796"
+     ]
+    },
+    "elwiki": {
+     "site": "elwiki",
+     "title": "Ερμιτάζ",
+     "badges": []
+    },
+    "enwiki": {
+     "site": "enwiki",
+     "title": "Hermitage Museum",
+     "badges": []
+    },
+    "eowiki": {
+     "site": "eowiki",
+     "title": "Muzeo Ermitejo",
+     "badges": []
+    },
+    "eswiki": {
+     "site": "eswiki",
+     "title": "Museo del Hermitage",
+     "badges": []
+    },
+    "etwiki": {
+     "site": "etwiki",
+     "title": "Ermitaaž",
+     "badges": []
+    },
+    "etwikiquote": {
+     "site": "etwikiquote",
+     "title": "Ermitaaž",
+     "badges": []
+    },
+    "euwiki": {
+     "site": "euwiki",
+     "title": "Hermitage Museoa",
+     "badges": []
+    },
+    "extwiki": {
+     "site": "extwiki",
+     "title": "Museu del Hermitage",
+     "badges": []
+    },
+    "fawiki": {
+     "site": "fawiki",
+     "title": "موزه ارمیتاژ",
+     "badges": []
+    },
+    "fiwiki": {
+     "site": "fiwiki",
+     "title": "Eremitaaši",
+     "badges": []
+    },
+    "frwiki": {
+     "site": "frwiki",
+     "title": "Musée de l'Ermitage",
+     "badges": []
+    },
+    "glkwiki": {
+     "site": "glkwiki",
+     "title": "ارميتاژ ٚ مۊزه",
+     "badges": []
+    },
+    "glwiki": {
+     "site": "glwiki",
+     "title": "Ermitage",
+     "badges": []
+    },
+    "hewiki": {
+     "site": "hewiki",
+     "title": "ארמיטאז'",
+     "badges": []
+    },
+    "hiwiki": {
+     "site": "hiwiki",
+     "title": "हर्मिटेज संग्रहालय",
+     "badges": []
+    },
+    "hrwiki": {
+     "site": "hrwiki",
+     "title": "Ermitaž",
+     "badges": []
+    },
+    "htwiki": {
+     "site": "htwiki",
+     "title": "Mize Èmitaj",
+     "badges": []
+    },
+    "huwiki": {
+     "site": "huwiki",
+     "title": "Ermitázs",
+     "badges": []
+    },
+    "hywiki": {
+     "site": "hywiki",
+     "title": "Էրմիտաժ (Սանկտ Պետերբուրգ)",
+     "badges": []
+    },
+    "hywwiki": {
+     "site": "hywwiki",
+     "title": "Էրմիթաժ (Ս․ Փեթերսպուրկ)",
+     "badges": []
+    },
+    "idwiki": {
+     "site": "idwiki",
+     "title": "Museum Ermitáž",
+     "badges": []
+    },
+    "itwiki": {
+     "site": "itwiki",
+     "title": "Ermitage",
+     "badges": []
+    },
+    "jawiki": {
+     "site": "jawiki",
+     "title": "エルミタージュ美術館",
+     "badges": []
+    },
+    "kawiki": {
+     "site": "kawiki",
+     "title": "ერმიტაჟი (სანქტ-პეტერბურგი)",
+     "badges": []
+    },
+    "kkwiki": {
+     "site": "kkwiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "kowiki": {
+     "site": "kowiki",
+     "title": "에르미타시 박물관",
+     "badges": []
+    },
+    "kywiki": {
+     "site": "kywiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "lawiki": {
+     "site": "lawiki",
+     "title": "Museum Solitarium",
+     "badges": []
+    },
+    "lijwiki": {
+     "site": "lijwiki",
+     "title": "Ermitage",
+     "badges": []
+    },
+    "ltwiki": {
+     "site": "ltwiki",
+     "title": "Ermitažas",
+     "badges": []
+    },
+    "lvwiki": {
+     "site": "lvwiki",
+     "title": "Valsts Ermitāža",
+     "badges": []
+    },
+    "mhrwiki": {
+     "site": "mhrwiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "mkwiki": {
+     "site": "mkwiki",
+     "title": "Ермитаж",
+     "badges": []
+    },
+    "mlwiki": {
+     "site": "mlwiki",
+     "title": "ഹെർമിറ്റേജ് മ്യൂസിയം",
+     "badges": []
+    },
+    "mniwiki": {
+     "site": "mniwiki",
+     "title": "ꯔꯁꯤꯌꯥꯒꯤ ꯍꯔꯃꯤꯇꯦꯖ ꯃ꯭ꯌꯨꯖꯤꯌꯝ",
+     "badges": []
+    },
+    "mnwiki": {
+     "site": "mnwiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "mznwiki": {
+     "site": "mznwiki",
+     "title": "هرمیتاژ موزه",
+     "badges": []
+    },
+    "nlwiki": {
+     "site": "nlwiki",
+     "title": "Hermitage (Sint-Petersburg)",
+     "badges": []
+    },
+    "nnwiki": {
+     "site": "nnwiki",
+     "title": "Eremitasjen",
+     "badges": []
+    },
+    "nowiki": {
+     "site": "nowiki",
+     "title": "Eremitasjen",
+     "badges": []
+    },
+    "pawiki": {
+     "site": "pawiki",
+     "title": "ਦ ਹਰਮੀਟੇਜ",
+     "badges": []
+    },
+    "plwiki": {
+     "site": "plwiki",
+     "title": "Ermitaż",
+     "badges": []
+    },
+    "ptwiki": {
+     "site": "ptwiki",
+     "title": "Hermitage",
+     "badges": []
+    },
+    "rowiki": {
+     "site": "rowiki",
+     "title": "Muzeul Ermitaj",
+     "badges": []
+    },
+    "ruwiki": {
+     "site": "ruwiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "ruwikinews": {
+     "site": "ruwikinews",
+     "title": "Категория:Эрмитаж",
+     "badges": []
+    },
+    "ruwikiquote": {
+     "site": "ruwikiquote",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "sahwiki": {
+     "site": "sahwiki",
+     "title": "Эрмитаж",
+     "badges": []
+    },
+    "shwiki": {
+     "site": "shwiki",
+     "title": "Ermitaž",
+     "badges": []
+    },
+    "simplewiki": {
+     "site": "simplewiki",
+     "title": "Hermitage Museum",
+     "badges": []
+    },
+    "skwiki": {
+     "site": "skwiki",
+     "title": "Ermitáž",
+     "badges": []
+    },
+    "slwiki": {
+     "site": "slwiki",
+     "title": "Ermitaž",
+     "badges": []
+    },
+    "srwiki": {
+     "site": "srwiki",
+     "title": "Ермитаж",
+     "badges": []
+    },
+    "srwikinews": {
+     "site": "srwikinews",
+     "title": "Категорија:Ермитаж",
+     "badges": []
+    },
+    "svwiki": {
+     "site": "svwiki",
+     "title": "Eremitaget",
+     "badges": []
+    },
+    "tawiki": {
+     "site": "tawiki",
+     "title": "ஏர்மிட்டேச் அருங்காட்சியகம்",
+     "badges": []
+    },
+    "tewiki": {
+     "site": "tewiki",
+     "title": "స్టేట్ హెర్మిటేజ్ మ్యూజియం",
+     "badges": []
+    },
+    "thwiki": {
+     "site": "thwiki",
+     "title": "พิพิธภัณฑ์แอร์มิทาช",
+     "badges": []
+    },
+    "trwiki": {
+     "site": "trwiki",
+     "title": "Ermitaj Müzesi",
+     "badges": []
+    },
+    "ukwiki": {
+     "site": "ukwiki",
+     "title": "Ермітаж",
+     "badges": []
+    },
+    "uzwiki": {
+     "site": "uzwiki",
+     "title": "Ermitaj",
+     "badges": []
+    },
+    "vepwiki": {
+     "site": "vepwiki",
+     "title": "Ermitaž",
+     "badges": []
+    },
+    "viwiki": {
+     "site": "viwiki",
+     "title": "Bảo tàng Ermitazh",
+     "badges": []
+    },
+    "warwiki": {
+     "site": "warwiki",
+     "title": "Museo nga Hermitage",
+     "badges": []
+    },
+    "wuuwiki": {
+     "site": "wuuwiki",
+     "title": "埃尔米塔日博物馆",
+     "badges": []
+    },
+    "zh_yuewiki": {
+     "site": "zh_yuewiki",
+     "title": "冬宮博物館",
+     "badges": []
+    },
+    "zhwiki": {
+     "site": "zhwiki",
+     "title": "埃尔米塔日博物馆",
+     "badges": []
+    }
+   }
+  },
+  "Q21026905": {
+   "type": "item",
+   "id": "Q21026905",
+   "sitelinks": {
+    "ruwiki": {
+     "site": "ruwiki",
+     "title": "Блокадная парикмахерская",
+     "badges": []
+    }
+   }
+  },
+  "Q100000000": {
+   "id": "Q100000000",
+   "missing": ""
+  }
+ },
+ "success": 1
+}

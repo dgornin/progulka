@@ -9,9 +9,22 @@ error text the model can act on.
 Grounding: every place a search returns is stored in `ResearchState.registry`, and
 shortlist_place accepts only ids from it, so the model cannot add a place it made up.
 Context hygiene: the model sees at most 25 compact results per search (id, name,
-kind, distance, hours, a 160-character snippet); full records stay in the registry.
-A slow source (Overpass can take a minute) is cut off after TOOL_TIMEOUT_S and
+kind, distance, popularity, hours, a 160-character snippet); full records stay in the
+registry. A slow source (Overpass can take a minute) is cut off after TOOL_TIMEOUT_S and
 reported as an error, so one tool call cannot eat the whole research budget.
+
+Ranking: each search scores its places once (`popularity`, 0..1: Wikipedia page views
+and language versions, app/sources/wikidata.py). Within NEAR_M of the start (the walking
+radius the prompt asks for) a city's must-sees come first, then its second line; all the
+rest follows by distance. By distance alone the 25 shown could fill up with ordinary
+places around the start while the landmark a kilometre away was cut off; lifted at any
+distance, the landmarks of a whole city would fill a list without a radius (Wikivoyage)
+and push out everything near. The score itself is shown too, so the model judges what a
+first visit needs. The scores come through the HTTP cache, so a search whose lookup
+succeeded shows the same list on a replayed run. A failed lookup only leaves the places
+unscored, ordered by distance, but it is not cached: replayed, the search can show a
+different list and miss the LLM cache, so a rehearsal counts only when its log has no
+popularity failure.
 
 The days of a multi-day trip are researched in parallel, one ResearchState each, and
 share two things: the registry (a place one day found is known to all) and the
@@ -40,12 +53,13 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from app.models import MUST_HAVE_WEIGHT, Candidate, GeoPoint, Place, TripBrief, clip
 from app.planning.geo import haversine_m
 from app.planning.validator import names_place
-from app.sources import osm, wikipedia, wikivoyage
+from app.sources import osm, wikidata, wikipedia, wikivoyage
 from app.sources.http import SourceError
 
 log = logging.getLogger(__name__)
 
 TOOL_TIMEOUT_S = 60
+NEAR_M = 2000  # the prompt's walking radius: well-known places nearer are listed first
 MAX_RESULTS_SHOWN = 25
 SNIPPET_CHARS = 160
 REASON_CHARS = 220
@@ -93,8 +107,9 @@ class ToolOutcome:
 
 class SearchOsm(BaseModel):
     """Search OpenStreetMap around the start point for places of the given categories.
-    Returns up to 25 nearest places: id, name, kind, dist_m, hours, snippet. Use it for
-    concrete kinds of places: museums, parks, cafes, street art, viewpoints."""
+    Returns up to 25 places, well-known ones (pop >= 0.5) within about 2 km first, then
+    by distance: id, name, kind, dist_m, pop, hours, snippet. Use it for concrete kinds of
+    places: museums, parks, cafes, street art, viewpoints."""
 
     categories: list[str] = Field(
         ..., min_length=1, max_length=6, description="Category keys from the catalog in the task"
@@ -112,9 +127,10 @@ class SearchOsm(BaseModel):
 
 class SearchWikipedia(BaseModel):
     """Search Wikipedia articles about places with coordinates near the start point.
-    Returns up to 25 nearest: id, name, kind, dist_m, snippet. Use a keyword query for
-    topics, styles, people and history ('конструктивизм', 'Пушкин'); omit the query to
-    get the notable places nearby."""
+    Returns up to 25, well-known ones (pop >= 0.5) within about 2 km first, then by
+    distance: id, name, kind, dist_m, pop, snippet. Use a keyword query for topics,
+    styles, people and history ('конструктивизм', 'Пушкин'); omit the query to get the
+    notable places nearby."""
 
     query: str | None = Field(
         None, description="Keywords in the traveller's language; omit for notable places nearby"
@@ -124,8 +140,9 @@ class SearchWikipedia(BaseModel):
 
 class GetWikivoyageListings(BaseModel):
     """Get the city's Wikivoyage travel-guide listings of one section: see (sights),
-    do (activities), eat, drink, buy. Returns up to 25 nearest to the start point: id,
-    name, kind, dist_m, hours, snippet. Best for food, drink and local favourites."""
+    do (activities), eat, drink, buy. Returns up to 25, well-known ones (pop >= 0.5)
+    within about 2 km of the start point first, then by distance: id, name, kind, dist_m,
+    pop, hours, snippet. Best for food, drink and local favourites."""
 
     section: Literal["see", "do", "eat", "drink", "buy"]
 
@@ -266,7 +283,7 @@ async def _search_osm(state: ResearchState, args: SearchOsm) -> ToolOutcome:
     places = await _shared(
         state,
         f"osm {_around(state)} {args.model_dump_json()}",
-        lambda: osm.search_places(state.start, args.radius_m, args.categories),
+        lambda: _rated(osm.search_places(state.start, args.radius_m, args.categories)),
     )
     label = f"OpenStreetMap ({', '.join(args.categories)}, {args.radius_m} м)"
     return _search_outcome(state, places, label)
@@ -278,12 +295,14 @@ async def _search_wikipedia(state: ResearchState, args: SearchWikipedia) -> Tool
     if args.query:
         query = args.query
         places = await _shared(
-            state, key, lambda: wikipedia.search(query, state.start, args.radius_m, lang=lang)
+            state,
+            key,
+            lambda: _rated(wikipedia.search(query, state.start, args.radius_m, lang=lang)),
         )
         label = f"Википедия «{args.query}» ({args.radius_m} м)"
     else:
         places = await _shared(
-            state, key, lambda: wikipedia.nearby(state.start, args.radius_m, lang=lang)
+            state, key, lambda: _rated(wikipedia.nearby(state.start, args.radius_m, lang=lang))
         )
         label = f"Википедия рядом ({args.radius_m} м)"
     return _search_outcome(state, places, label)
@@ -297,7 +316,9 @@ async def _get_wikivoyage_listings(
     places = await _shared(
         state,
         f"wikivoyage {brief.language} {brief.city} {args.section}",
-        lambda: wikivoyage.listings(brief.city, lang=brief.language, sections=[args.section]),
+        lambda: _rated(
+            wikivoyage.listings(brief.city, lang=brief.language, sections=[args.section])
+        ),
     )
     return _search_outcome(state, places, f"Wikivoyage ({args.section})")
 
@@ -318,6 +339,7 @@ async def _get_place_details(state: ResearchState, args: GetPlaceDetails) -> Too
         "kind": place.kind,
         "source": place.source,
         "dist_m": _distance_m(state.start, place),
+        "pop": place.popularity,
         "hours": place.opening_hours,
         "indoor": place.indoor,
         "description": place.description,
@@ -453,6 +475,34 @@ def _forget(state: ResearchState, key: str, search: _Search) -> None:
         del state.searches[key]
 
 
+async def _rated(search: Awaitable[list[Place]]) -> list[Place]:
+    """The places of one source query with their popularity: one lookup for the whole
+    batch, inside the shared query, so the days that send the same search share it too.
+
+    wikidata.popularity turns Wikimedia failures into unscored places itself; this also
+    keeps a bug in it from failing the search, which would cost far more than the hint.
+    The lookup gets only what the tool timeout leaves, less a margin for the answer: past
+    it, a slow but successful search (Overpass queued behind other days) would come back
+    as a timeout and lose its places.
+    """
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    places = await search
+    took = loop.time() - started
+    left = TOOL_TIMEOUT_S - took - 2
+    if left < 1:
+        log.warning("popularity of %d places skipped: the search took %.0f s", len(places), took)
+        return places
+    try:
+        scores = await wikidata.popularity(places, left)
+    except Exception:
+        log.exception("popularity of %d places failed", len(places))
+        return places
+    return [
+        p.model_copy(update={"popularity": scores[p.id]}) if p.id in scores else p for p in places
+    ]
+
+
 def _around(state: ResearchState) -> str:
     return f"{state.start.lat:.5f},{state.start.lon:.5f}"
 
@@ -470,7 +520,12 @@ def _search_outcome(state: ResearchState, places: list[Place], label: str) -> To
         state.registry.setdefault(place.id, place)
         state.seen.setdefault(place.id, place)
         found.append(place)
-    found.sort(key=lambda p: _distance_m(state.start, p))
+    found.sort(
+        key=lambda p: (
+            wikidata.tier(p.popularity) if (d := _distance_m(state.start, p)) <= NEAR_M else 2,
+            d,
+        )
+    )
     shown = [_compact(state, p) for p in found[:MAX_RESULTS_SHOWN]]
     payload: dict[str, Any] = {"found": len(found), "places": shown}
     if not found:
@@ -487,6 +542,8 @@ def _compact(state: ResearchState, place: Place) -> dict[str, Any]:
         "kind": place.kind,
         "dist_m": _distance_m(state.start, place),
     }
+    if place.popularity is not None:
+        item["pop"] = place.popularity
     if place.opening_hours:
         item["hours"] = place.opening_hours
     if place.description:

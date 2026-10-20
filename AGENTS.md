@@ -14,6 +14,7 @@ picks, orders and validates the stops. FastAPI + SQLite, vanilla JS UI; README.m
   replanner, memory, speech); all system prompts are in `prompts.py`.
 - `app/planning/`: deterministic optimizer, validator, opening hours, walking geometry and routing.
 - `app/sources/`: open-data clients; all HTTP goes through `sources/http.py` (User-Agent, cache, retries).
+  `sources/wikidata.py` scores how well known a found place is (Wikipedia views, Wikidata sitelinks).
 - `app/llm.py`, `config.py`: the only LLM wrapper (no framework) and settings from the environment.
 - `app/static/`: UI without a build step. `tests/`: offline tests. `eval/`: agent vs one-prompt baseline.
 - `Dockerfile`, `docker-compose*.yml`, `deploy/Caddyfile`, `.github/workflows/ci.yml`: image, deploy, CI.

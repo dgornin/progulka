@@ -73,9 +73,14 @@ class HttpClient:
         url: str,
         params: dict[str, Any] | None = None,
         *,
+        timeout_s: float | None = None,
+        attempts: int = 3,
         cacheable: Callable[[Any], bool] | None = None,
     ) -> Any:
-        return await self._request("GET", url, params=params, cacheable=cacheable)
+        """`timeout_s` and `attempts` let a caller whose answer is optional fail fast."""
+        return await self._request(
+            "GET", url, params=params, timeout_s=timeout_s, attempts=attempts, cacheable=cacheable
+        )
 
     async def post_form_json(
         self,

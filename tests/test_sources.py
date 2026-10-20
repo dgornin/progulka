@@ -463,6 +463,24 @@ async def test_a_slow_query_does_not_leave_the_only_overpass_instance_dead(monke
     assert len(sent) == 3
 
 
+async def test_a_get_can_fail_fast():
+    """A caller whose answer is optional (popularity) gives a shorter timeout and fewer
+    attempts than the client's defaults."""
+    timeouts: list[float] = []
+
+    async def server(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"]["read"])
+        return httpx.Response(503)
+
+    client = HttpClient(cache_dir=None, user_agent="test")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(server))
+
+    with pytest.raises(SourceError) as failure:
+        await client.get_json("https://wiki.test/w/api.php", {"n": 1}, timeout_s=4.0, attempts=1)
+
+    assert failure.value.status == 503 and timeouts == [4.0]
+
+
 async def test_a_client_error_is_not_retried_and_keeps_its_status():
     async def server(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"code": "NoRoute"})

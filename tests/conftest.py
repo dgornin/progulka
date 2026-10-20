@@ -1,5 +1,6 @@
-"""Shared fixtures of the persistence tests: a fresh SQLite store, finished journeys, and
-a database file as the app left it before journeys existed."""
+"""Shared fixtures: no popularity lookups unless a test asks for them, and for the
+persistence tests a fresh SQLite store, finished journeys, and a database file as the app
+left it before journeys existed."""
 
 import json
 import sqlite3
@@ -24,12 +25,27 @@ from app.models import (
     TripBrief,
 )
 from app.pipeline import DayRun, Journey
+from app.sources import wikidata
 from app.store import Store
 
 DAY = date(2026, 10, 24)
 START = GeoPoint(lat=59.93, lon=30.36, label="центр, Санкт-Петербург")
 # In the registry of every journey below, but no day refers to it: saving drops it.
 UNPICKED = Place(id="osm:node/99", name="Не выбрано", lat=59.9, lon=30.3, kind="cafe", source="osm")
+
+
+@pytest.fixture(autouse=True)
+def no_popularity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every search tool scores its places through Wikimedia (app/sources/wikidata.py).
+    Tests of other sources fake only their own source's answers: here no place gets a
+    score, so they stay focused and never reach the network. tests/test_wikidata.py puts
+    the real lookup back on top of its own fake of the HTTP client."""
+
+    async def unknown(places: object, timeout_s: float | None = None) -> dict[str, float]:
+        return {}
+
+    monkeypatch.setattr(wikidata, "popularity", unknown)
+    monkeypatch.setattr(wikidata, "_down_until", 0.0)  # no outage left over from a test
 
 
 @pytest.fixture

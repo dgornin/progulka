@@ -98,6 +98,11 @@ class Place(BaseModel):
     opening_hours: str | None = Field(None, description="OSM opening_hours syntax, if known")
     indoor: bool | None = None
     tags: dict[str, str] = Field(default_factory=dict)
+    # Set by the research tools (app/sources/wikidata.py); None when unknown, and in
+    # journeys saved before it existed.
+    popularity: float | None = Field(
+        None, ge=0, le=1, description="How well known: Wikipedia page views and language versions"
+    )
 
 
 class Candidate(BaseModel):
