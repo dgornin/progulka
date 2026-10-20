@@ -1,0 +1,24 @@
+{
+  "anthropic__claude-haiku-5.5.json": {
+    "commit": "2e742b4",
+    "run_at": "2026-10-20T14:35+03:00",
+    "queries": [
+      "spb-constructivism",
+      "spb-classic-kids",
+      "moscow-modernism",
+      "kazan-history",
+      "kaliningrad-koenigsberg",
+      "nizhny-views",
+      "ekb-avantgarde",
+      "paris-impressionism"
+    ]
+  },
+  "anthropic__claude-haiku-5.5-journeys.json": {
+    "commit": "d45abbd",
+    "run_at": "2026-10-20T14:49+03:00",
+    "queries": [
+      "kazan-3-days",
+      "spb-5-days"
+    ]
+  }
+}
