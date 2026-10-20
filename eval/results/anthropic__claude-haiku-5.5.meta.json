@@ -14,11 +14,14 @@
     ]
   },
   "anthropic__claude-haiku-5.5-journeys.json": {
-    "commit": "c620619",
-    "run_at": "2026-10-20T19:26+03:00",
+    "commit": "7a5a8c2",
+    "run_at": "2026-10-20T21:27+03:00",
+    "trip_planner_agent": true,
     "queries": [
       "kazan-3-days",
-      "spb-5-days"
+      "spb-5-days",
+      "moscow-4-days",
+      "paris-3-days"
     ]
   },
   "anthropic__claude-haiku-5.5-harness.json": {

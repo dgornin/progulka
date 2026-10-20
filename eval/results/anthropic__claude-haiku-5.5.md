@@ -25,12 +25,14 @@ Run 2026-10-20T19:26+03:00, commit `c620619`. Agent stops are source records wit
 
 ## Trips of several days: agent only
 
-Run 2026-10-20T19:26+03:00, commit `c620619`. The one-prompt baseline plans a single walk by design, so trips run the agent only. Closed, impossible legs and walk km are summed over the days; repeats are pairs of stops on different days that are one place.
+Run 2026-10-20T21:27+03:00, commit `7a5a8c2`. The one-prompt baseline plans a single walk by design, so trips run the agent only. Closed, impossible legs and walk km are summed over the days; repeats are pairs of stops on different days that are one place.
 
 | query | days (planned/requested) | stops per day | closed at visit | impossible legs | days over window | repeats across days | avoid hits | interests covered | mean pop | top share | walk km | LLM calls | cost $ | s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| kazan-3-days | 3/3 | 15, 13, 11 | 0 | 0 | 0 | 0 | 0 | 5/5 | 0.49 | 0.05 | 15.6 | 16 | 0.0249 | 36.8 |
-| spb-5-days | 5/5 | 15, 11, 11, 14, 14 | 0 | 0 | 0 | 0 | 0 | 4/4 | 0.45 | 0.02 | 41.3 | 28 | 0.0433 | 74.4 |
+| kazan-3-days | 3/3 | 11, 10, 3 | 0 | 0 | 0 | 0 | 0 | 5/5 | 0.53 | 0.12 | 10.6 | 31 | 0.051 | 96.2 |
+| spb-5-days | 5/5 | 11, 8, 9, 11, 10 | 0 | 0 | 0 | 0 | 0 | 3/3 | 0.44 | 0.0 | 40.1 | 33 | 0.0524 | 83.0 |
+| moscow-4-days | 4/4 | 12, 13, 10, 11 | 0 | 0 | 0 | 0 | 0 | 5/5 | 0.55 | 0.07 | 29.4 | 28 | 0.0442 | 71.1 |
+| paris-3-days | 3/3 | 8, 15, 12 | 0 | 0 | 0 | 0 | 0 | 4/4 | 0.47 | 0.12 | 14.2 | 22 | 0.0316 | 54.6 |
 
 ## Harness: chat with web search
 
