@@ -58,6 +58,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from itertools import pairwise
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -81,6 +82,7 @@ from app.models import (
     GeoPoint,
     HourWeather,
     LocalTime,
+    Pace,
     Place,
     Plan,
     TripBrief,
@@ -93,7 +95,7 @@ from app.personalization import (
     traveller_facts,
     with_feedback,
 )
-from app.planning.geo import walk_limit_km
+from app.planning.geo import street_meters, walk_limit_km, walk_minutes
 from app.planning.optimizer import optimize, schedule
 from app.planning.routing import walking_route
 from app.planning.validator import matches_avoid, names_place, validate
@@ -722,6 +724,40 @@ async def _write(day: DayRun, llm: LLM, emit: Emit, plan: Plan, facts: Sequence[
     await stage(emit, "write", "done", "Маршрут готов")
 
 
+def _costliest(
+    order: Sequence[Candidate],
+    points: Sequence[GeoPoint],
+    legs: Sequence[float],
+    pace: Pace,
+    *,
+    by_time: bool,
+) -> Candidate:
+    """The optional stop to drop when the routed walk does not fit: the one that costs the
+    most walking (or time, when the walk is late but not too long) per point of its score.
+
+    Lowest score first would be blind to geography: the optimizer measures streets as
+    straight lines, so a stop across a river can cost kilometres it never saw, and dropping
+    the cheap stops around such a detour empties the day while the detour stays. `legs[i]`
+    is the routed walk to order[i] (points[0] is the start), so the saving counts real
+    streets; the walk that replaces a dropped stop is not routed yet and is estimated.
+    """
+
+    def cost(i: int) -> float:
+        saved = legs[i]
+        if i + 1 < len(legs):
+            # The walk that replaces the two legs is at least their difference (triangle
+            # inequality): a neighbour of a detour does not get the blame for it.
+            bypass = max(street_meters(points[i], points[i + 2]), abs(legs[i + 1] - legs[i]))
+            saved += legs[i + 1] - bypass
+        if by_time:
+            return walk_minutes(max(saved, 0.0), pace) + order[i].visit_minutes
+        return saved
+
+    optional = [i for i, c in enumerate(order) if not c.required]
+    worst = max(optional, key=lambda i: (cost(i) / max(order[i].score, 0.05), order[i].place.id))
+    return order[worst]
+
+
 async def _build(day: DayRun, emit: Emit, borrowed: Mapping[str, Candidate] | None = None) -> Plan:
     """`borrowed`: other days' candidates this day may use (see _borrowed)."""
     state = day.state
@@ -769,15 +805,17 @@ async def _build(day: DayRun, emit: Emit, borrowed: Mapping[str, Candidate] | No
         route = await walking_route(points) if order else None
         timed = schedule(order, state.start, state.brief, route.leg_meters if route else None)
         # Real streets can be longer than the optimizer's estimate; if the walk no
-        # longer fits those bounds, drop the weakest optional stop and route again.
+        # longer fits those bounds, drop the optional stop that costs the most for
+        # its value (_costliest) and route again.
         late = timed.stops and timed.stops[-1].depart > end_limit
         too_long = timed.total_walk_m > walk_limit_m
         optional = [c for c in order if not c.required]
         if not (late or too_long) or len(order) <= 2 or not optional:
             break
-        weakest = min(optional, key=lambda c: (c.score, c.place.id))
-        order.remove(weakest)
-        dropped.append(weakest.place.id)
+        legs = route.leg_meters if route else [street_meters(a, b) for a, b in pairwise(points)]
+        costliest = _costliest(order, points, legs, state.brief.pace, by_time=not too_long)
+        order.remove(costliest)
+        dropped.append(costliest.place.id)
     routed_out = len(dropped) - len(result.dropped)
     # No route: no geometry, and the UI joins the stops with dotted straight lines.
     geometry = route.geometry if route else None

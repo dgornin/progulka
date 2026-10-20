@@ -4,6 +4,7 @@ sources, real optimizer and validator. Trips of several days: tests/test_journey
 import asyncio
 import json
 from datetime import date, datetime, time
+from itertools import pairwise
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from app.agent.prompts import MEMORY, RESEARCHER
 from app.agent.tools import ResearchState
 from app.llm import ToolCall
 from app.models import Candidate, GeoPoint, HourWeather, Place, TripBrief
+from app.planning.geo import street_meters
 from app.planning.routing import RouteResult
 from app.profile import Profile, WalkPreferences
 from app.sources import geocode, osm, weather
@@ -384,6 +386,36 @@ async def test_real_streets_longer_than_the_limit_drop_the_weakest_stop(sources,
 
     assert day.plan.total_walk_m <= 3_500
     assert len(day.plan.stops) == 3 and len(day.plan.dropped) == 1
+
+
+async def test_a_detour_across_the_river_is_dropped_not_the_stops_around_it(monkeypatch):
+    # Six stops in a row on one bank and one across the river: the optimizer's straight
+    # lines call it close, real streets go round by a bridge, 3 km each way. Dropping the
+    # lowest score first would empty the day around the detour; the detour has to go.
+    bank = [_place(10 + n, "monument", 0.001 * n) for n in range(6)]
+    across = _place(20, "viewpoint", 0.0065)
+    shortlist = {
+        p.id: Candidate(place=p, score=0.5, reason="рядом", visit_minutes=15) for p in bank
+    }
+    shortlist[across.id] = Candidate(place=across, score=0.7, reason="вид", visit_minutes=15)
+
+    async def round_by_the_bridge(points):
+        legs = [
+            3000.0 if across.lat in (a.lat, b.lat) else street_meters(a, b)
+            for a, b in pairwise(points)
+        ]
+        return RouteResult(geometry=[[p.lat, p.lon] for p in points], leg_meters=legs)
+
+    monkeypatch.setattr(pipeline, "walking_route", round_by_the_bridge)
+    brief = TripBrief(
+        city="Казань", date=DAY, start_time=time(10), end_time=time(14), max_walk_km=3
+    )
+    state = ResearchState(brief=brief, start=CENTER, weather_summary="", shortlist=shortlist)
+
+    plan = await pipeline._build(pipeline.DayRun(id="t", state=state, weather=[]), Recorder())
+
+    assert plan.dropped == [across.id]
+    assert [s.place.id for s in plan.stops] == sorted(p.id for p in bank)
 
 
 async def test_a_required_stop_that_ends_late_does_not_strip_the_route(sources):
