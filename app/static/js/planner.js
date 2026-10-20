@@ -1690,11 +1690,17 @@ function renderProfileNote(profile) {
     interests ? count(interests, "интерес", "интереса", "интересов") : null,
     profile.avoid.length ? `не предлагать: ${profile.avoid.length}` : null,
   ].filter(Boolean);
-  if (!parts.length) {
+  if (state.user.is_demo) {
+    // Shared by every visitor: its profile is read-only (the API refuses edits) and its
+    // runs learn nothing, so there is no «изменить» and the note says why.
+    const what = parts.length ? ` (${parts.join(" · ")})` : "";
+    ui.profileNote.replaceChildren("Демо-аккаунт общий: учтём его ", link("профиль"), `${what}, но ничего не запомним о вас.`);
+  } else if (!parts.length) {
     ui.profileNote.replaceChildren("Профиль пуст: ", link("расскажите о себе"), ", и агент будет это учитывать.");
     return;
+  } else {
+    ui.profileNote.replaceChildren("Учтём ваш профиль: ", parts.join(" · "), " · ", link("изменить"));
   }
-  ui.profileNote.replaceChildren("Учтём ваш профиль: ", parts.join(" · "), " · ", link("изменить"));
   if (profile.home_city) {
     ui.requestHint.textContent =
       `Как другу: что любите, что не надо, с кем едете. Город, даты и время — ниже. Можно ничего ` +

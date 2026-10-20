@@ -16,6 +16,8 @@ import { ago, confirmDialog, h, plural, svg, toast } from "./ui.js";
 const list = document.getElementById("trips");
 const count = document.getElementById("trips-count");
 let journeys = [];
+// The shared demo account may not delete (the API answers 403), so it gets no button.
+let shared = false;
 
 const km = (value) => value.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
 const titleOf = (journey) => journey.title || `Путешествие: ${journey.city}`;
@@ -131,14 +133,16 @@ function journeyCard(journey) {
       "footer",
       { class: "trip-foot" },
       h("span", { title: new Date(journey.updated_at).toLocaleString("ru-RU") }, `изменено ${ago(journey.updated_at)}`),
-      h(
-        "button",
-        { class: "btn btn-ghost btn-sm trip-delete", type: "button", "aria-label": `Удалить путешествие «${title}»` },
-        "Удалить",
-      ),
+      shared
+        ? null
+        : h(
+            "button",
+            { class: "btn btn-ghost btn-sm trip-delete", type: "button", "aria-label": `Удалить путешествие «${title}»` },
+            "Удалить",
+          ),
     ),
   );
-  card.querySelector(".trip-delete").addEventListener("click", () => remove(journey, card));
+  card.querySelector(".trip-delete")?.addEventListener("click", () => remove(journey, card));
   return card;
 }
 
@@ -217,7 +221,9 @@ async function load() {
 }
 
 try {
-  renderNav(await requireUser(), "trips");
+  const user = await requireUser();
+  shared = user.is_demo;
+  renderNav(user, "trips");
   await load();
 } catch (error) {
   list.replaceChildren(h("div", { class: "alert is-error" }, error.message));

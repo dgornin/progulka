@@ -37,6 +37,10 @@ class PlanEdit(BaseModel):
         default_factory=list, description="Interest labels as listed in the brief"
     )
     add_avoid: list[str] = Field(default_factory=list)
+    add_places: list[str] = Field(
+        default_factory=list,
+        description="Specific named places the traveller asks to add, names as they wrote them",
+    )
     start_time: LocalTime | None = Field(None, description="New start, HH:MM; null = unchanged")
     end_time: LocalTime | None = Field(None, description="New end, HH:MM; null = unchanged")
     rain_from: LocalTime | None = Field(

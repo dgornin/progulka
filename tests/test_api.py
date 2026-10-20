@@ -12,9 +12,11 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.auth import hash_password
+from app.db import connect
 from app.limits import BUDGET_SPENT, HOUR_S, Limits, SlidingWindow
 from app.models import AgentEvent
 from app.pipeline import TOO_MANY_DAYS, PipelineError
+from app.store import Store
 
 DEMO = ("demo@progulka.app", "progulka-demo")
 ADMIN = ("admin@progulka.app", "admin-secret-1")
@@ -147,6 +149,17 @@ def _journey_data(response):
 
 def _feedback(client, journey_id="j1", day=0, **body):
     return client.post(f"/api/journeys/{journey_id}/days/{day}/feedback", json=body)
+
+
+async def _remember(database_url, email, facts):
+    """Store facts for an account straight in its database, between two app starts."""
+    engine = connect(database_url)
+    try:
+        store = Store(engine)
+        user, _ = await store.credentials(email)
+        await store.add_memory(user.id, facts)
+    finally:
+        await engine.dispose()
 
 
 def _wav(seconds=1.0, rate=16_000, channels=1):
@@ -640,23 +653,43 @@ def test_the_shared_demo_account_cannot_be_wiped_and_a_restart_resets_it(
     monkeypatch.setattr(main, "busy_journeys", set())
     with TestClient(main.app) as client:
         _login(client, *DEMO)
-        # Planning, feedback and memory work in it; deleting and the questionnaire do not.
+        # Planning and feedback work in it; deleting and the questionnaire do not.
         journey_id = _journey_data(client.post("/api/plan", json=THREE_DAYS))["journey_id"]
         assert _feedback(client, journey_id, feedback="без музеев").status_code == 200
-        facts = client.get("/api/memory").json()
-        assert facts
         for refused in (
             client.put("/api/profile", json={"home_city": "Казань"}),
-            client.delete(f"/api/memory/{facts[0]['id']}"),
+            client.delete("/api/memory/1"),
             client.delete(f"/api/journeys/{journey_id}"),
         ):
             assert refused.status_code == 403 and refused.json()["detail"] == main.DEMO_IS_SHARED
+    # Facts an older version let the demo's visitors teach it.
+    asyncio.run(_remember(main.settings.database_url, DEMO[0], ["Любит конструктивизм"]))
 
     with TestClient(main.app) as client:
         _login(client, *DEMO)
         assert client.get("/api/profile").json()["home_city"] == "Санкт-Петербург"
         assert client.get("/api/memory").json() == []  # what visitors taught it is gone
-        assert [j["id"] for j in client.get("/api/journeys").json()] == [journey_id]
+        assert client.get("/api/journeys").json() == []  # and what they typed
+
+
+def test_the_shared_demo_account_learns_nothing_from_its_visitors(client, pipeline):
+    """Its password is public: a fact learned from one visitor's words would reach the
+    next stranger's agent. Its runs get no memory, so the real pipeline makes no
+    extraction call, and main stores nothing even when a pipeline reports facts."""
+    _login(client, *DEMO)
+    assert client.get("/api/me").json()["user"]["is_demo"]
+
+    plan = _journey_data(client.post("/api/plan", json=THREE_DAYS))
+    feedback = _journey_data(_feedback(client, plan["journey_id"], feedback="я вегетарианец"))
+
+    assert plan["learned"] == feedback["learned"] == []
+    assert [call["memory"] for call in pipeline.calls] == [None, None]
+    assert client.get("/api/memory").json() == []
+
+    _register(client)  # anyone else keeps a memory of their own, and is told so
+    assert not client.get("/api/me").json()["user"]["is_demo"]
+    assert _journey_data(client.post("/api/plan", json=THREE_DAYS))["learned"]
+    assert pipeline.calls[-1]["memory"] == []
 
 
 def test_admin_rights_follow_the_env_across_restarts(tmp_path, monkeypatch, pipeline):

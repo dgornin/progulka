@@ -273,6 +273,9 @@
   align-items: start;
 }
 .profile-sections, .profile-form { display: grid; gap: 20px; }
+/* the shared demo's questionnaire: a disabled fieldset in place of the form */
+fieldset.profile-form { min-width: 0; margin: 0; padding: 0; border: 0; }
+.demo-note { max-width: 62ch; margin-top: 8px; }
 
 .profile-toc {
   position: sticky;

@@ -23,7 +23,7 @@ from itertools import zip_longest
 from app.config import settings
 from app.models import GeoPoint, Place
 from app.planning.geo import haversine_m
-from app.sources.http import SourceError, http
+from app.sources.http import HostDown, SourceError, http
 
 # Public Overpass instances are often overloaded (the main one answered in 40 s or
 # with 502 while we built this), so each gets one short attempt and the first one
@@ -196,6 +196,14 @@ async def search_places(
     return _dedupe(interleaved)[:limit]
 
 
+def kind_of(tags: dict[str, str]) -> str | None:
+    """The kind of a place by its OSM tags: the first category, in CATEGORIES order,
+    whose filters the tags pass; None if none does. For tags that did not come through
+    an Overpass query, such as a Nominatim hit's in the eval: one tag-to-kind mapping,
+    so a hit is "museum" exactly when search_places would call it one."""
+    return next((s.kind for s in CATEGORIES.values() if _matches_any(tags, s.filters)), None)
+
+
 def _build_query(center: GeoPoint, radius_m: int, specs: list[CategorySpec]) -> str:
     """A bounding-box query around the circle. A box uses Overpass's spatial index;
     the same filters with (around:...) timed out on two public instances where the
@@ -211,11 +219,20 @@ def _build_query(center: GeoPoint, radius_m: int, specs: list[CategorySpec]) -> 
 
 
 async def _overpass(query: str) -> list[dict]:
-    """Run the query on the preferred instance, failing over to the others in order."""
+    """Run the query on the preferred instance, failing over to the others in order.
+
+    When the HTTP client skips every instance as down (one slow query can time out on
+    each in turn), the first one still gets this query: the breaker must not leave the
+    source dead for everyone, least of all with a single instance configured."""
     global _preferred
     urls = settings.overpass_urls
+    order = [*range(_preferred, len(urls)), *range(_preferred)]
     errors = []
-    for i in [*range(_preferred, len(urls)), *range(_preferred)]:
+    skipped = 0
+    for n, i in enumerate([*order, order[0]]):  # the extra pass: the probe
+        probe = n == len(order)
+        if probe and skipped < len(order):
+            break
         try:
             payload = await http.post_form_json(
                 urls[i],
@@ -224,9 +241,11 @@ async def _overpass(query: str) -> list[dict]:
                 attempts=1,
                 cache_as="overpass",
                 cacheable=_is_complete,
+                probe=probe,
             )
         except SourceError as e:
             errors.append(str(e))
+            skipped += isinstance(e, HostDown)
             if _preferred == i:
                 _preferred = (i + 1) % len(urls)  # queries from now on start at the next
             continue

@@ -8,7 +8,8 @@ id in that event always points at a stored journey; `done` closes the stream wit
 run's LLM usage.
 
 The traveller's profile and recent memory facts go into every run; facts the run
-learned are stored and reported in the `journey` event.
+learned are stored and reported in the `journey` event. The shared demo account keeps
+no memory at all (_is_shared_demo).
 
 Voice input is recorded in the browser and sent here as a short WAV: an audio-capable
 LLM transcribes it (app/agent/speech.py), so it works in every browser, including
@@ -340,9 +341,16 @@ async def logout(request: Request, store: StoreDep) -> Response:
 # --- the signed-in traveller ---
 
 
+class Account(UserOut):
+    """The signed-in user as the pages see it: `is_demo` lets them show the shared demo
+    account read-only instead of offering the controls the API refuses it (403)."""
+
+    is_demo: bool
+
+
 @app.get("/api/me")
-async def me(user: UserDep) -> dict[str, UserOut]:
-    return {"user": user}
+async def me(user: UserDep) -> dict[str, Account]:
+    return {"user": Account(**user.model_dump(), is_demo=_is_shared_demo(user))}
 
 
 @app.get("/api/profile")
@@ -488,7 +496,7 @@ Job = Callable[[LLM, Emit], Awaitable[Outcome]]
 async def plan(
     req: PlanRequest, request: Request, user: UserDep, store: StoreDep
 ) -> StreamingResponse:
-    profile, facts = await _traveller(store, user.id)
+    profile, facts = await _traveller(store, user)
     # Refused here, not inside the stream: an empty form must not use up an hourly run.
     if not has_place(req, profile):
         raise HTTPException(status_code=422, detail=EMPTY_REQUEST)
@@ -502,9 +510,7 @@ async def plan(
         await store.create_journey(user.id, journey, req.request, req.preferences, entry)
         # A fact points at the day it was learned on; the request of a journey speaks
         # for all its days, so its facts point at the first.
-        learned = await store.add_memory(
-            user.id, journey.learned, source_trip_id=journey.days[0].id
-        )
+        learned = await _remember(store, user, journey.learned, journey.days[0].id)
         return Outcome(journey, None, learned)
 
     return _stream(job, request, user)
@@ -541,7 +547,7 @@ async def feedback(
             stop.place.id in req.exclude_place_ids for stop in stops
         ):
             raise HTTPException(status_code=409, detail="Этого места уже нет в маршруте")
-        profile, facts = await _traveller(store, user.id)
+        profile, facts = await _traveller(store, user)
         text = _feedback_text(req, stops)
 
         async def job(llm: LLM, emit: Emit) -> Outcome:
@@ -552,9 +558,7 @@ async def feedback(
                 kind="feedback", day=index, text=text, reply=reply, cost_usd=llm.usage.cost_usd
             )
             await store.update_journey(user.id, updated, entry)
-            learned = await store.add_memory(
-                user.id, updated.learned, source_trip_id=updated.days[index].id
-            )
+            learned = await _remember(store, user, updated.learned, updated.days[index].id)
             return Outcome(updated, reply, learned)
 
         return _stream(job, request, user, journey_id=journey_id)
@@ -563,18 +567,41 @@ async def feedback(
         raise
 
 
-def _refuse_on_shared_demo(user: UserOut) -> None:
-    """The demo account's password is public: what one visitor deletes or writes into the
-    questionnaire (whose notes reach the agent's prompts), every later visitor gets.
-    Planning, feedback and the memory they teach still work in it, and a restart resets
-    its profile and memory (auth.seed_account)."""
+def _is_shared_demo(user: UserOut) -> bool:
+    """The demo account's password is public (GET /api/config): whatever one visitor
+    leaves in it, every later visitor gets. Every rule for it asks here: no deleting and
+    no questionnaire (_refuse_on_shared_demo), no memory read or written (_traveller,
+    _remember), and the pages learn it from GET /api/me."""
     demo = settings.demo_email.strip().lower() if settings.demo_password else ""
-    if demo and user.email == demo:
+    return bool(demo) and user.email == demo
+
+
+def _refuse_on_shared_demo(user: UserOut) -> None:
+    """Refuse what the shared demo may not do: deleting, and writing the questionnaire,
+    whose notes reach the agent's prompts. Planning and feedback still work in it, and a
+    restart resets its profile, memory and journeys (auth.seed_account)."""
+    if _is_shared_demo(user):
         raise HTTPException(status_code=403, detail=DEMO_IS_SHARED)
 
 
-async def _traveller(store: Store, user_id: int) -> tuple[Profile, list[str]]:
-    return await store.get_profile(user_id), await store.memory_texts(user_id, MEMORY_IN_CONTEXT)
+async def _traveller(store: Store, user: UserOut) -> tuple[Profile, list[str] | None]:
+    """The profile and the newest memory facts a run gets. The shared demo gets None, not
+    its empty memory: to the pipeline that means "the caller keeps no memory", so the run
+    makes no extraction call and learns nothing from a stranger's words (plan_journey)."""
+    if _is_shared_demo(user):
+        memory = None
+    else:
+        memory = await store.memory_texts(user.id, MEMORY_IN_CONTEXT)
+    return await store.get_profile(user.id), memory
+
+
+async def _remember(store: Store, user: UserOut, facts: list[str], day_id: str) -> list[str]:
+    """Store what a run learned; the facts that were new are what the `journey` event
+    reports. Never for the shared demo, whatever the pipeline returned: a fact one
+    visitor's request taught it would reach the next stranger's agent as their own."""
+    if _is_shared_demo(user):
+        return []
+    return await store.add_memory(user.id, facts, source_trip_id=day_id)
 
 
 def _feedback_text(req: FeedbackRequest, stops: list[Stop]) -> str:

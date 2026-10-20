@@ -1,9 +1,10 @@
-openai>=1.100,<3
-python-dotenv>=1.0,<2
-httpx>=0.27,<1
-fastapi>=0.115,<1
-uvicorn[standard]>=0.30,<1
-pydantic>=2.8,<3
-opening-hours-py>=2.1,<3
-sqlalchemy[asyncio]>=2.0.22,<3
-aiosqlite>=0.20,<1
+# Exact pins (==): the image rebuilt next month must install the same packages as today's.
+openai==2.54.0
+python-dotenv==1.2.4
+httpx==0.28.1
+fastapi==0.150.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+opening-hours-py==2.1.4
+sqlalchemy[asyncio]==2.1.5
+aiosqlite==0.22.1

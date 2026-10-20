@@ -8,8 +8,9 @@ background task that keeps running an agent after the request handler has return
 A journey is a pipeline Journey at rest: a row for the journey and a row per day.
 Each day's ResearchState (a dataclass of pydantic models) and hourly weather go
 through pydantic TypeAdapters to JSON and back, so feedback on a saved day continues
-exactly where the last run stopped, restart or not. `taken` (the places of the other
-days) is not saved: the pipeline sets it before every run.
+exactly where the last run stopped, restart or not. `taken` and `rejected_elsewhere`
+(what the other days planned and lost) are not saved: the pipeline sets them before
+every run.
 
 In memory the days of a journey share one registry of found places, so one search
 serves every day. A day is saved with only the places its state refers to (shortlist,
@@ -407,6 +408,11 @@ class Store:
                 delete(JourneyRow).where(JourneyRow.id == journey_id, JourneyRow.user_id == user_id)
             )
         return result.rowcount > 0
+
+    async def delete_journeys(self, user_id: int) -> None:
+        """Every journey of the user, with their days."""
+        async with self._db.begin() as s:
+            await s.execute(delete(JourneyRow).where(JourneyRow.user_id == user_id))
 
     async def _load(self, user_id: int, journey_id: str) -> tuple[JourneyRow, list[DayRow]] | None:
         async with self._db() as s:

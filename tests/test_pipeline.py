@@ -536,6 +536,20 @@ async def test_feedback_text_is_learned_from_and_the_remove_button_is_not(source
     assert llm.structured_replies == []  # and the button made no memory call
 
 
+async def test_without_a_memory_feedback_text_is_not_learned_from(sources):
+    """The shared demo account's runs get no memory (main._traveller): a visitor's words
+    cost no extraction call and teach the account nothing."""
+    events = Recorder()
+    journey, llm = await _planned(events)
+    llm.structured_replies = [{"reply": "Учту."}, _texts([p.id for p in PLACES])]
+
+    await _feedback(journey, llm, events, feedback="кстати, я вегетарианец")
+
+    assert journey.learned == []
+    assert all(system["content"] != MEMORY for system, *_ in llm.seen)
+    assert not [e for e in events if e.type == "memory" or e.data.get("name") == "memory"]
+
+
 def test_rain_from_feedback_marks_the_remaining_hours_rainy():
     brief = TripBrief(city="Казань", date=DAY, start_time=time(10), end_time=time(18), interests=[])
     forecast = [HourWeather(time=datetime(2026, 10, 24, 15), precipitation_probability=10)]

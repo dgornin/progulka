@@ -13,6 +13,7 @@ const LINKS = [
   ["profile", "/app/profile", "Профиль"],
   ["admin", "/app/admin", "Админ"],
 ];
+const DEMO_HINT = "Демо-аккаунт общий для всех гостей: анкета только для просмотра, агент ничего не запоминает";
 
 /** The brand mark: a dotted walk from an ink start through a stop to the goal. */
 function logo() {
@@ -64,6 +65,8 @@ export function renderNav(user, active) {
         { class: "topbar-user" },
         h("span", { class: "avatar", "aria-hidden": "true" }, Array.from(name.trim())[0]?.toUpperCase()),
         h("span", { class: "user-name", title: user.email }, name),
+        // on every page, so a visitor of the shared demo knows the account is not theirs
+        user.is_demo ? h("span", { class: "tag", title: DEMO_HINT }, "общий") : null,
         h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: signOut }, "Выйти"),
       ),
     ),

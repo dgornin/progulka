@@ -10,6 +10,7 @@ import json
 from collections import Counter
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -426,3 +427,50 @@ async def test_a_mirror_that_failed_is_skipped_by_the_requests_queued_behind_it(
 
     assert hits == {"mirror.test": 1}
     assert all(isinstance(failure, SourceError) for failure in failures)
+
+
+async def test_a_slow_query_does_not_leave_the_only_overpass_instance_dead(monkeypatch):
+    """The breaker skips an instance that just failed, but when it skips every one, the
+    query is still sent to the first: an answer closes the breaker for everyone."""
+    url = "https://overpass.test/api/interpreter"
+    answers: list[httpx.Response | Exception] = [
+        httpx.ReadTimeout("an expensive query"),
+        httpx.Response(200, json=fixture("overpass_pushkinskaya")),
+        httpx.Response(200, json=fixture("overpass_pushkinskaya")),
+    ]
+    sent: list[bool] = []
+
+    async def server(request: httpx.Request) -> httpx.Response:
+        sent.append(True)
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    client = HttpClient(cache_dir=None, user_agent="test")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(server))
+    monkeypatch.setitem(MIN_INTERVAL, "overpass.test", 0)
+    monkeypatch.setattr(osm, "http", client)
+    monkeypatch.setattr(osm, "settings", SimpleNamespace(overpass_urls=[url]))
+    monkeypatch.setattr(osm, "_preferred", 0)
+    point = GeoPoint(lat=59.9330, lon=30.3570)
+
+    with pytest.raises(SourceError, match="ReadTimeout"):
+        await osm.search_places(point, 4000, ["museum", "park"])
+    assert await osm.search_places(point, 500, ["museum"])  # skipped as down, then probed
+    assert await osm.search_places(point, 600, ["museum"])  # the answer closed the breaker
+
+    assert len(sent) == 3
+
+
+async def test_a_client_error_is_not_retried_and_keeps_its_status():
+    async def server(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"code": "NoRoute"})
+
+    client = HttpClient(cache_dir=None, user_agent="test")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(server))
+
+    with pytest.raises(SourceError) as failure:
+        await client.get_json("https://routing.test/route")
+
+    assert failure.value.status == 400

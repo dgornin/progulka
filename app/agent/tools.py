@@ -21,7 +21,9 @@ serves them all. Each day still looks places up in its own records first (`seen`
 an OSM element's kind depends on the categories searched, and a day's tool results
 must not depend on which day registered a place first, or a rehearsed run stops
 replaying from the LLM cache. `taken` marks the places other days of the trip have
-planned or the traveller removed there: never shown, never shortlisted.
+planned, `rejected_elsewhere` the places the traveller removed there: neither is
+shown or shortlisted (the pipeline lifts a rejection when the traveller asks for the
+place on this day).
 """
 
 import asyncio
@@ -64,8 +66,9 @@ class ResearchState:
     excluded: set[str] = field(default_factory=set)  # ids the traveller rejected
     finish_attempts: int = 0  # finish_research calls in the current research run
     # Transient, never saved (exclude=True): set by the pipeline before every run, from
-    # what the other days have planned (or had rejected) at that moment.
+    # what the other days have planned, and what the traveller removed there, at that moment.
     taken: Annotated[set[str], Field(exclude=True)] = field(default_factory=set)
+    rejected_elsewhere: Annotated[set[str], Field(exclude=True)] = field(default_factory=set)
     # Transient: source query key -> _Search, shared by the days of one planning run.
     searches: Annotated[dict[str, Any], Field(exclude=True)] = field(default_factory=dict)
     # Transient: this day's own record of every place its tools returned (see the module
@@ -73,8 +76,9 @@ class ResearchState:
     seen: Annotated[dict[str, Place], Field(exclude=True)] = field(default_factory=dict)
 
     def available(self) -> dict[str, Candidate]:
-        """The shortlist without the places other days of the trip have taken."""
-        return {pid: c for pid, c in self.shortlist.items() if pid not in self.taken}
+        """The shortlist without the places other days of the trip have taken or lost."""
+        out = self.taken | self.rejected_elsewhere
+        return {pid: c for pid, c in self.shortlist.items() if pid not in out}
 
 
 @dataclass
@@ -455,8 +459,9 @@ def _around(state: ResearchState) -> str:
 
 def _search_outcome(state: ResearchState, places: list[Place], label: str) -> ToolOutcome:
     found = []
+    out = state.excluded | state.taken | state.rejected_elsewhere
     for place in places:
-        if place.id in state.excluded or place.id in state.taken:
+        if place.id in out:
             continue
         # setdefault keeps a record already enriched by get_place_details. The model is
         # shown the source's own record: a day's tool results must not depend on what the
@@ -495,6 +500,10 @@ def _lookup(state: ResearchState, place_id: str) -> Place:
     if place_id in state.taken:
         raise ToolRejected(
             f"'{place_id}' is already in the route of another day of the trip; choose another place"
+        )
+    if place_id in state.rejected_elsewhere:
+        raise ToolRejected(
+            f"the traveller removed '{place_id}' from another day of the trip; choose another place"
         )
     place = state.seen.get(place_id) or state.registry.get(place_id)
     if place is None:

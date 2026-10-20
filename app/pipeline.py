@@ -38,10 +38,12 @@ order, opening hours) is code, and the validator is the external critic the repa
 round listens to.
 
 Feedback on a day re-enters at research (when new places are needed) or at
-optimize, with the stops of the other days and the places removed from them taken,
-and every route, first or rebuilt, goes through the same validation and repair
-round. A failed feedback run is not saved: the caller stores the trip only after
-success.
+optimize, with the stops of the other days taken and the places removed from them
+kept out, and every route, first or rebuilt, goes through the same validation and
+repair round. A stop of another day is out for good; a place removed from another
+day is out until the traveller asks for it on this one: «Убрать» on one day and
+«добавь X» on another is how a place moves between days. A failed feedback run is
+not saved: the caller stores the trip only after success.
 
 Personal context: the planner panel, the request, the profile and later the feedback
 are merged into the brief by code (app/personalization.py); long-term memory and the
@@ -341,14 +343,13 @@ async def apply_day_feedback(
     inform the agent, the writer and the learning."""
     day = journey.days[day_index]
     assert day.plan is not None  # store and plan_journey never keep a day without a route
-    # Unavailable: the other days' stops, and what the traveller removed from them,
-    # which may still be on this day's shortlist: a rejected place is rejected for the trip.
-    day.state.taken = {
-        pid
-        for other in journey.days
-        if other is not day
-        for pid in [*(stop.place.id for stop in other.plan.stops), *other.state.excluded]
-    }
+    # The other days' stops are taken. What the traveller removed from them may still be
+    # on this day's shortlist and stays out too, unless the traveller asks for it on this
+    # day (_apply_edit): then the place moves here. Recomputed every run, so the move
+    # lasts while this day's brief asks for the place.
+    others = [other for other in journey.days if other is not day]
+    day.state.taken = {stop.place.id for other in others for stop in other.plan.stops}
+    day.state.rejected_elsewhere = {pid for other in others for pid in other.state.excluded}
     facts = traveller_facts(profile, memory or [])
     reply = await _feedback(day, day.plan, req, llm, _for_day(emit, day_index), facts)
     if len(journey.days) == 1:
@@ -725,18 +726,18 @@ async def _build(day: DayRun, emit: Emit, borrowed: Mapping[str, Candidate] | No
     """`borrowed`: other days' candidates this day may use (see _borrowed)."""
     state = day.state
     pool = {**(borrowed or {}), **state.shortlist}
-    # Out: what the traveller rejected, what other days took, what the current avoid
-    # list rules out, and any other source's record of those places or of a candidate
-    # already kept. Ids alone miss the Wikipedia article of an OSM stop; the registry
-    # is shared, so it holds the other days' stops too.
-    blocked = [state.registry[p] for p in state.taken | state.excluded if p in state.registry]
+    # Out: what the traveller rejected here or on another day, what other days took,
+    # what the current avoid list rules out, and any other source's record of those
+    # places or of a candidate already kept. Ids alone miss the Wikipedia article of an
+    # OSM stop; the registry is shared, so it holds the other days' places too.
+    out = state.taken | state.excluded | state.rejected_elsewhere
+    blocked = [state.registry[p] for p in out if p in state.registry]
     candidates: list[Candidate] = []
     # The day's own shortlist first, so of two records of a place it keeps its own (the
     # optimizer sorts by id itself: the order matters only there).
     for pid, c in sorted(pool.items(), key=lambda item: item[0] not in state.shortlist):
         if (
-            pid in state.excluded
-            or pid in state.taken
+            pid in out
             or any(matches_avoid(a, c.place.kind, c.place.name) for a in state.brief.avoid)
             or any(same_place(c.place, p) for p in [*blocked, *(k.place for k in candidates)])
         ):
@@ -830,11 +831,21 @@ def _apply_edit(day: DayRun, edit: PlanEdit, excluded: dict[str, str]) -> None:
     for pid in avoided:
         state.shortlist.pop(pid, None)
     # A place the traveller asked for and now removes is no longer asked for: research
-    # must not search it again, nor the validator report it missing.
+    # must not search it again, nor the validator report it missing. A place they ask
+    # to add is: the validator reports it if the route still lacks it.
     names = [*excluded.values(), *avoided.values()]
-    wanted = [w for w in state.brief.must_include if not any(names_place(w, n) for n in names)]
+    asked = [*state.brief.must_include, *edit.add_places]
+    wanted = [w for w in dict.fromkeys(asked) if not any(names_place(w, n) for n in names)]
     # The feedback is the newest layer of the brief's precedence: «добавь музей» must
     # lift the profile's «не предлагать музеи», or the route leaves the museum out.
+    # And «добавь X» lifts an older «Убрать» of X, on this day or another.
+    unrejected = {
+        pid
+        for pid in state.excluded | state.rejected_elsewhere
+        if pid in state.registry and any(names_place(w, state.registry[pid].name) for w in wanted)
+    }
+    state.excluded -= unrejected
+    state.rejected_elsewhere -= unrejected
     brief = with_feedback(
         state.brief.model_copy(update={"must_include": wanted}),
         edit.add_interests,

@@ -9,9 +9,10 @@ fixed; warnings are shown to the traveller.
 """
 
 import re
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from app.models import MUST_HAVE_WEIGHT, HourWeather, Plan, Stop, TripBrief, Violation
+from app.models import MUST_HAVE_WEIGHT, HourWeather, Interest, Plan, Stop, TripBrief, Violation
 from app.planning.geo import walk_limit_km
 from app.planning.hours import is_open, open_intervals
 from app.sources.weather import is_rainy
@@ -145,14 +146,21 @@ def _route_violations(plan: Plan, text: dict[str, str]) -> list[Violation]:
         found.append(
             _violation("long_walk", "warning", text, km=plan.total_walk_m / 1000, limit=walk_limit)
         )
-    covered = {label.strip().lower() for stop in plan.stops for label in stop.interests}
-    for interest in brief.interests:
-        if interest.weight >= MUST_HAVE_WEIGHT and interest.label.strip().lower() not in covered:
+    for interest in uncovered_interests(plan.stops, brief.interests):
+        if interest.weight >= MUST_HAVE_WEIGHT:
             found.append(_violation("uncovered_interest", "warning", text, label=interest.label))
     for wanted in brief.must_include:
         if not any(names_place(wanted, stop.place.name) for stop in plan.stops):
             found.append(_violation("missing_must_include", "warning", text, name=wanted))
     return found
+
+
+def uncovered_interests(stops: Sequence[Stop], interests: Sequence[Interest]) -> list[Interest]:
+    """The interests no stop serves: none of the stops' interest labels is the interest's
+    label. Shared with the eval's coverage metric, so the eval and this validator agree
+    on what covers an interest."""
+    covered = {label.strip().lower() for stop in stops for label in stop.interests}
+    return [i for i in interests if i.label.strip().lower() not in covered]
 
 
 def matches_avoid(avoid: str, kind: str, name: str) -> bool:

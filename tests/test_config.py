@@ -42,3 +42,15 @@ def test_speech_model_has_a_default_and_can_be_changed(monkeypatch):
 
     monkeypatch.setenv("STT_MODEL", "google/gemini-3.5-flash")
     assert load_settings().stt_model == "google/gemini-3.5-flash"
+
+
+def test_secrets_stay_out_of_the_settings_repr(monkeypatch):
+    # A traceback or a log line that prints the settings must not print the key.
+    monkeypatch.setenv("API_KEY", "sk-secret-value")
+    monkeypatch.setenv("DEMO_PASSWORD", "demo-secret-value")
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin-secret-value")
+
+    shown = repr(load_settings())
+
+    assert "secret-value" not in shown
+    assert "model_name=" in shown

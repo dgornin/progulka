@@ -318,8 +318,50 @@ async def test_a_place_removed_from_one_day_is_not_planned_on_another(sources, m
         journey, 0, pipeline.FeedbackRequest(feedback="без первого места"), llm, Recorder()
     )
 
-    assert rejected.id in journey.days[0].state.taken
+    state = journey.days[0].state
+    assert state.taken == {"osm:node/11", "osm:node/12"}  # the other day's stops only
+    assert state.rejected_elsewhere == {rejected.id}
     assert {s.place.id for s in journey.days[0].plan.stops} == {"osm:node/2", spare.id}
+
+
+async def test_a_place_removed_from_one_day_moves_to_another_when_the_traveller_asks(
+    sources, make_journey
+):
+    journey = make_journey(days=2)
+    first, second = journey.days
+    removed = first.state.registry["osm:node/13"]  # the traveller removed it from day 2
+    # Wikipedia's record of it, which the first day's research found.
+    article = removed.model_copy(update={"id": "wikipedia:ru:13", "source": "wikipedia"})
+    first.state.registry[article.id] = article
+    first.state.shortlist[article.id] = Candidate(
+        place=article, score=0.9, reason="рядом", visit_minutes=20
+    )
+    llm = TripLLM(
+        turns={},
+        structured={
+            "PlanEdit": [
+                {"reply": "Хорошо."},
+                {"add_places": ["Место 13"], "reply": "Добавляю Место 13."},
+                {"reply": "Хорошо."},  # a later edit keeps the moved place
+            ]
+        },
+    )
+
+    async def edit(text: str) -> list[str]:
+        await pipeline.apply_day_feedback(
+            journey, 0, pipeline.FeedbackRequest(feedback=text), llm, Recorder()
+        )
+        return [s.place.id for s in journey.days[0].plan.stops]
+
+    assert article.id not in await edit("подольше")  # removed elsewhere: not picked by itself
+    assert article.id in await edit("добавь Место 13")
+    assert article.id in await edit("подольше")
+    plan = journey.days[0].plan
+    assert "Место 13" in plan.brief.must_include
+    assert not [v for v in plan.violations if v.code == "missing_must_include"]
+    assert journey.days[0].state.rejected_elsewhere == set()
+    assert journey.days[0].state.taken == {"osm:node/11", "osm:node/12"}
+    assert second.state.excluded == {removed.id}  # the other day is not touched
 
 
 async def test_a_day_the_provider_fails_is_built_from_the_other_days_places(sources):

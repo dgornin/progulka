@@ -8,8 +8,11 @@
   fetched twice and a rehearsed demo does not depend on the network;
 - retries with backoff on 429/5xx and timeouts; callers with mirrors (Overpass)
   ask for one short attempt instead and fail over themselves. A mirror that fails
-  so is skipped for MIRROR_DOWN_S: the requests queued behind it on its host's lock
-  would otherwise each wait out the timeout before trying the next mirror.
+  so is skipped for MIRROR_DOWN_S (HostDown): the requests queued behind it on its
+  host's lock would otherwise each wait out the timeout before trying the next
+  mirror. A `probe` request is sent all the same, and an answer ends the skipping:
+  the caller probes when every mirror is skipped, so one expensive query that timed
+  out everywhere cannot take the source away from everyone for MIRROR_DOWN_S.
 """
 
 import asyncio
@@ -38,7 +41,19 @@ MIRROR_DOWN_S = 60.0
 
 
 class SourceError(RuntimeError):
-    """A data source failed after retries; the agent sees this as a tool error."""
+    """A data source failed after retries; the agent sees this as a tool error.
+
+    `status`: the HTTP status of the last answer; None when none came (a transport
+    error or timeout), which callers with a breaker of their own tell apart from a
+    4xx about the request itself."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+class HostDown(SourceError):
+    """Not sent: the mirror failed less than MIRROR_DOWN_S ago."""
 
 
 class HttpClient:
@@ -71,9 +86,11 @@ class HttpClient:
         attempts: int = 3,
         cache_as: str | None = None,
         cacheable: Callable[[Any], bool] | None = None,
+        probe: bool = False,
     ) -> Any:
         """`cache_as` replaces the URL in the cache key, so mirrors share one cache entry;
-        `cacheable` keeps error payloads that arrive with HTTP 200 out of the cache."""
+        `cacheable` keeps error payloads that arrive with HTTP 200 out of the cache;
+        `probe` sends the request even to a mirror that is skipped as down."""
         return await self._request(
             "POST",
             url,
@@ -82,6 +99,7 @@ class HttpClient:
             attempts=attempts,
             cache_as=cache_as,
             cacheable=cacheable,
+            probe=probe,
         )
 
     async def _request(
@@ -94,6 +112,7 @@ class HttpClient:
         attempts: int = 3,
         cache_as: str | None = None,
         cacheable: Callable[[Any], bool] | None = None,
+        probe: bool = False,
     ) -> Any:
         key = self._key(method, cache_as or url, params, data)
         cached = self._cache_read(key)
@@ -112,8 +131,8 @@ class HttpClient:
             async with gate:
                 # Checked once the gate is ours: the request may have queued behind the
                 # one that found the mirror down.
-                if self._down_until.get(host, 0) > time.monotonic():
-                    raise SourceError(f"{host}: failed a moment ago, skipped")
+                if not probe and self._down_until.get(host, 0) > time.monotonic():
+                    raise HostDown(f"{host}: failed a moment ago, skipped")
                 wait = MIN_INTERVAL.get(host, 0) - (time.monotonic() - self._last.get(host, 0))
                 if wait > 0:
                     await asyncio.sleep(wait)
@@ -134,6 +153,7 @@ class HttpClient:
                 if mirror and (resp is None or resp.status_code in RETRY_STATUSES):
                     self._down_until[host] = time.monotonic() + MIRROR_DOWN_S
             if resp is not None and resp.status_code == 200:
+                self._down_until.pop(host, None)  # it answers again
                 try:
                     payload = resp.json()
                 except ValueError as e:
@@ -141,14 +161,15 @@ class HttpClient:
                 if cacheable is None or cacheable(payload):
                     self._cache_write(key, payload)
                 return payload
-            if resp is not None:
-                error = f"{host}: HTTP {resp.status_code}"
-                if resp.status_code not in RETRY_STATUSES:
+            status = resp.status_code if resp is not None else None
+            if status is not None:
+                error = f"{host}: HTTP {status}"
+                if status not in RETRY_STATUSES:
                     break
             if attempt < attempts:
                 await asyncio.sleep(delay)
                 delay *= 2
-        raise SourceError(error)
+        raise SourceError(error, status)
 
     @staticmethod
     def _key(method: str, url: str, params: Any, data: Any) -> str:

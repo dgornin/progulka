@@ -371,13 +371,23 @@ async def test_slow_routing_service_gives_none(monkeypatch):
     assert await routing.walking_route(ROUTE_POINTS) is None
 
 
-async def test_a_failed_routing_service_is_not_asked_again_for_a_while(monkeypatch):
-    calls = _fake_osrm(monkeypatch, SourceError("down"))
+@pytest.mark.parametrize(
+    ("error", "asked"),
+    [
+        (SourceError("no answer"), 1),
+        (SourceError("HTTP 503", 503), 1),
+        # OSRM's NoRoute/NoSegment: these points have no route, the server is fine.
+        (SourceError("HTTP 400", 400), 2),
+    ],
+    ids=["no-answer", "5xx", "no-route-400"],
+)
+async def test_a_failed_routing_service_is_not_asked_again_for_a_while(monkeypatch, error, asked):
+    calls = _fake_osrm(monkeypatch, error)
 
     assert await routing.walking_route(ROUTE_POINTS) is None
-    assert await routing.walking_route(ROUTE_POINTS) is None  # the next day: straight lines
+    assert await routing.walking_route(ROUTE_POINTS) is None  # the next day
 
-    assert len(calls) == 1
+    assert len(calls) == asked
 
 
 async def test_long_polyline_is_thinned(monkeypatch):

@@ -8,6 +8,9 @@
  * Both edit a single draft shaped exactly like the server's Profile and send it whole
  * with PUT /api/profile, which also marks the traveller as onboarded (so «Пропустить»
  * saves too: the questionnaire is offered once, not on every login).
+ *
+ * The shared demo account (user.is_demo) is shown read-only: the server refuses its
+ * questionnaire and keeps no memory for it, so the page offers neither and says why.
  */
 
 import { api, requireUser } from "./api.js";
@@ -363,7 +366,14 @@ function memoryItem(fact, onForget) {
   return item;
 }
 
-function memorySection() {
+function memorySection(user) {
+  if (user.is_demo) {
+    return section(
+      "memory",
+      "Что агент помнит о вас",
+      "В общем демо-аккаунте агент ничего не запоминает: иначе то, что рассказал о себе один гость, попало бы в маршруты следующих. В своём аккаунте здесь появятся предпочтения из ваших запросов и правок — «не люблю очереди», «хожу быстро».",
+    );
+  }
   const list = h("ul", { class: "memory-list", "aria-live": "polite" }, h("li", { class: "skeleton line wide" }));
   let facts = [];
   const render = () => {
@@ -392,23 +402,9 @@ function memorySection() {
   );
 }
 
-function renderProfile(user) {
-  const status = h("p", { class: "savebar-status", "aria-live": "polite" });
-  const revert = h("button", { class: "btn btn-ghost", type: "button" }, "Отменить");
-  const submit = h("button", { class: "btn btn-primary", type: "submit" }, "Сохранить");
-  const bar = h("div", { class: "savebar" }, status, h("div", { class: "savebar-actions" }, revert, submit));
-  syncs.add(() => {
-    const dirty = isDirty();
-    status.textContent = dirty ? "Есть несохранённые изменения" : "Все изменения сохранены";
-    status.classList.toggle("is-dirty", dirty);
-    bar.classList.toggle("is-dirty", dirty);
-    revert.hidden = !dirty;
-    if (!submit.classList.contains("is-busy")) submit.disabled = !dirty;
-  });
-
-  const form = h(
-    "form",
-    { class: "profile-form", novalidate: true },
+/** The questionnaire as one form with a save bar; the shared demo's, read-only. */
+function profileForm(user) {
+  const sections = [
     section(
       "interests",
       "Интересы",
@@ -426,8 +422,24 @@ function renderProfile(user) {
       cityField(),
     ),
     section("about", "Еда и о себе", null, dietField(), aboutField()),
-    bar,
-  );
+  ];
+  // PUT /api/profile refuses the shared demo (403): the same fields, all disabled at once.
+  if (user.is_demo) return h("fieldset", { class: "profile-form", disabled: true }, sections);
+
+  const status = h("p", { class: "savebar-status", "aria-live": "polite" });
+  const revert = h("button", { class: "btn btn-ghost", type: "button" }, "Отменить");
+  const submit = h("button", { class: "btn btn-primary", type: "submit" }, "Сохранить");
+  const bar = h("div", { class: "savebar" }, status, h("div", { class: "savebar-actions" }, revert, submit));
+  syncs.add(() => {
+    const dirty = isDirty();
+    status.textContent = dirty ? "Есть несохранённые изменения" : "Все изменения сохранены";
+    status.classList.toggle("is-dirty", dirty);
+    bar.classList.toggle("is-dirty", dirty);
+    revert.hidden = !dirty;
+    if (!submit.classList.contains("is-busy")) submit.disabled = !dirty;
+  });
+
+  const form = h("form", { class: "profile-form", novalidate: true }, sections, bar);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (await save(submit)) toast("Профиль сохранён", "ok");
@@ -437,7 +449,10 @@ function renderProfile(user) {
     syncs.clear();
     renderProfile(user); // text fields read the draft only when built, so rebuild them
   });
+  return form;
+}
 
+function renderProfile(user) {
   const toc = [
     ["interests", "Интересы"],
     ["avoid", "Не предлагать"],
@@ -455,6 +470,13 @@ function renderProfile(user) {
         h("p", { class: "eyebrow" }, "Профиль"),
         h("h1", { class: "title" }, "Что вы любите в поездках"),
         h("p", { class: "muted" }, `${user.name || "Без имени"} · ${user.email}`),
+        user.is_demo
+          ? h(
+              "p",
+              { class: "alert is-info demo-note" },
+              "Это общий демо-аккаунт: в нём гуляют все гости сайта. Поэтому анкету здесь можно только посмотреть, а агент ничего не запоминает о вас. Свой аккаунт бесплатный: выйдите и зарегистрируйтесь.",
+            )
+          : null,
       ),
     ),
     h(
@@ -465,7 +487,7 @@ function renderProfile(user) {
         { class: "profile-toc", "aria-label": "Разделы профиля" },
         toc.map(([id, label]) => h("a", { href: `#${id}` }, label)),
       ),
-      h("div", { class: "profile-sections" }, form, memorySection()),
+      h("div", { class: "profile-sections" }, profileForm(user), memorySection(user)),
     ),
   );
   changed();
@@ -583,7 +605,8 @@ try {
   catalog = loadedCatalog;
   draft = { ...EMPTY_PROFILE, ...profile };
   savedSnapshot = snapshot(draft);
-  if (ONBOARDING) {
+  // The demo is onboarded already and cannot save a questionnaire: it sees its profile.
+  if (ONBOARDING && !user.is_demo) {
     document.title = "Анкета — Прогулка";
     renderOnboarding(user);
   } else {

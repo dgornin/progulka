@@ -5,7 +5,7 @@ image runs on a laptop and on a server; docker compose passes .env via env_file.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -26,7 +26,9 @@ def _env(name: str, default: str) -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    api_key: str
+    # Secrets stay out of repr(): a traceback or a log line that prints the settings
+    # must not print the key or the passwords.
+    api_key: str = field(repr=False)
     base_url: str
     model_name: str
     # Transcribes voice input: a chat model that accepts audio (app/agent/speech.py).
@@ -51,9 +53,9 @@ class Settings:
     # Accounts created (or whose password is reset to these values) at startup, so an
     # operator rotates them by editing .env. Empty = no such account.
     demo_email: str
-    demo_password: str
+    demo_password: str = field(repr=False)
     admin_email: str
-    admin_password: str
+    admin_password: str = field(repr=False)
 
 
 def load_settings() -> Settings:

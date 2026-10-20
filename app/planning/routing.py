@@ -10,7 +10,9 @@ keeps the estimate and draws straight lines. For the same reason the wait is cap
 the shared HTTP client retries for up to two minutes, and a nicer line on the map is
 not worth that. After a failure the server is not asked for DOWN_S: the days of a
 trip and their repair rounds are routed one after another, and each would wait out
-the cap again.
+the cap again. Only a failure of the server counts (no answer, 429, 5xx): OSRM
+answers "no route through these points" (NoRoute, NoSegment) with HTTP 400, and that
+says nothing about the next day's points.
 """
 
 import asyncio
@@ -46,8 +48,12 @@ async def walking_route(points: list[GeoPoint]) -> RouteResult | None:
                 OSRM_FOOT + coords,
                 params={"overview": "full", "geometries": "geojson", "steps": "false"},
             )
-    except (SourceError, TimeoutError):
+    except TimeoutError:
         _down_until = time.monotonic() + DOWN_S
+        return None
+    except SourceError as e:
+        if e.status is None or e.status == 429 or e.status >= 500:
+            _down_until = time.monotonic() + DOWN_S
         return None
     if data.get("code") != "Ok" or not data.get("routes"):
         return None

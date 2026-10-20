@@ -228,11 +228,15 @@ def _task(
             + json.dumps(current, ensure_ascii=False)
         )
     if state.excluded:
-        rejected = "; ".join(
-            f"{state.registry[i].name} ({i})" if i in state.registry else i
+        # JSON like the shortlist: the names come from OSM and Wikipedia, not from us.
+        rejected = [
+            {"id": i, "name": state.registry[i].name} if i in state.registry else {"id": i}
             for i in sorted(state.excluded)
+        ]
+        parts.append(
+            "The traveller rejected these places; never shortlist them: "
+            + json.dumps(rejected, ensure_ascii=False)
         )
-        parts.append(f"The traveller rejected these places; never shortlist them: {rejected}")
     if goal:
         parts.append(f"Goal of this run: {goal}")
     return "\n\n".join(parts)
