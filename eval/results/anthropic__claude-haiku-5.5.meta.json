@@ -1,7 +1,8 @@
 {
   "anthropic__claude-haiku-5.5.json": {
-    "commit": "c620619",
-    "run_at": "2026-10-20T19:26+03:00",
+    "commit": "55dab95+dirty",
+    "run_at": "2026-10-20T22:42+03:00",
+    "trip_planner_agent": true,
     "queries": [
       "spb-constructivism",
       "spb-classic-kids",
@@ -14,11 +15,51 @@
     ]
   },
   "anthropic__claude-haiku-5.5-journeys.json": {
-    "commit": "c620619",
-    "run_at": "2026-10-20T19:26+03:00",
+    "commit": "7a5a8c2",
+    "run_at": "2026-10-20T21:27+03:00",
+    "trip_planner_agent": true,
     "queries": [
       "kazan-3-days",
-      "spb-5-days"
+      "spb-5-days",
+      "moscow-4-days",
+      "paris-3-days"
+    ]
+  },
+  "anthropic__claude-haiku-5.5-harness.json": {
+    "anthropic/claude-haiku-5.5": [
+      {
+        "commit": "9bb00f7+dirty",
+        "run_at": "2026-10-20T20:54+03:00",
+        "rescored_at": "2026-10-20T22:42+03:00",
+        "rescore_commit": "55dab95+dirty",
+        "reasoning": "off",
+        "queries": [
+          "spb-constructivism",
+          "spb-classic-kids",
+          "moscow-modernism",
+          "kazan-history",
+          "kaliningrad-koenigsberg",
+          "nizhny-views",
+          "ekb-avantgarde",
+          "paris-impressionism"
+        ]
+      }
+    ],
+    "anthropic/claude-sonnet-5.5": [
+      {
+        "commit": "9bb00f7+dirty",
+        "run_at": "2026-10-20T21:02+03:00",
+        "rescored_at": "2026-10-20T22:42+03:00",
+        "rescore_commit": "55dab95+dirty",
+        "reasoning": "default",
+        "queries": [
+          "spb-constructivism",
+          "spb-classic-kids",
+          "moscow-modernism",
+          "kazan-history",
+          "kaliningrad-koenigsberg"
+        ]
+      }
     ]
   }
 }

@@ -50,5 +50,17 @@
     "request": "Пять дней в Петербурге с 24 октября. Люблю конструктивизм, хороший кофе и виды на воду, музеи не надо. Живём у Московского вокзала.",
     "days": 5,
     "avoid": ["музеи"]
+  },
+  {
+    "id": "moscow-4-days",
+    "request": "Москва, четыре дня с 24 октября, с 11 до 19. Советский модернизм и конструктивизм, парки, хорошие кофейни, книжные магазины. Живём у Китай-города.",
+    "days": 4,
+    "avoid": []
+  },
+  {
+    "id": "paris-3-days",
+    "request": "Paris, three days from October 24, 10:00 to 18:00. Impressionist painting, old bookshops, bakeries, walks along the Seine. Avoid churches. We stay near Place de la République.",
+    "days": 3,
+    "avoid": ["churches"]
   }
 ]

@@ -6,63 +6,340 @@
       "музеи"
     ],
     "agent": {
-      "stops": 12,
-      "found": 12,
+      "stops": 13,
+      "found": 13,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 7.0,
+      "walk_km": 8.5,
       "avoid_hits": 0,
       "interests_covered": 3,
       "interests_total": 3,
       "llm_calls": 6,
-      "cost_usd": 0.0086,
-      "seconds": 29.1,
-      "mean_pop": 0.47,
-      "top_share": 0.0
+      "cost_usd": 0.0093,
+      "seconds": 30.3,
+      "mean_pop": 0.43,
+      "top_share": 0.0,
+      "prompt_tokens": 62684,
+      "completion_tokens": 6008,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 12,
+      "places_found": 12,
+      "vague": 1
     },
     "agent_stops": [
-      "Столовая №3",
-      "B.B. King",
-      "Большой концертный зал «Октябрьский»",
-      "Дом Бассейного товарищества",
-      "Виктор Цой",
-      "Природа и Человек",
-      "Михаил Горшенёв",
-      "По морям, по волнам, нынче здесь, а завтра?",
+      "Туристы",
+      "Чугунолитейный и механический завод Сан-Галли",
       "Кошка Тиша (Тишина Матроскина)",
+      "Hochu Coffee",
+      "Михаил Горшенёв",
+      "Виктор Цой",
+      "B.B. King",
+      "Дом Бассейного товарищества",
+      "Фреска Иоганн Бах",
+      "Леший",
       "Дом-коммуна инженеров и писателей",
       "Пышечная на Большой Конюшенной",
       "Булочная-кондитерская «Чорек»"
     ],
+    "agent_detail": [
+      {
+        "name": "Туристы",
+        "item": "place",
+        "found": true,
+        "lat": 59.9290222,
+        "lon": 30.3633753,
+        "arrive": "11:02",
+        "depart": "11:12"
+      },
+      {
+        "name": "Чугунолитейный и механический завод Сан-Галли",
+        "item": "place",
+        "found": true,
+        "lat": 59.923607,
+        "lon": 30.35767,
+        "arrive": "11:27",
+        "depart": "11:42"
+      },
+      {
+        "name": "Кошка Тиша (Тишина Матроскина)",
+        "item": "place",
+        "found": true,
+        "lat": 59.9259435,
+        "lon": 30.3522532,
+        "arrive": "11:50",
+        "depart": "12:00"
+      },
+      {
+        "name": "Hochu Coffee",
+        "item": "activity",
+        "found": true,
+        "lat": 59.9294249,
+        "lon": 30.3595436,
+        "arrive": "12:11",
+        "depart": "12:31"
+      },
+      {
+        "name": "Михаил Горшенёв",
+        "item": "place",
+        "found": true,
+        "lat": 59.9299908,
+        "lon": 30.3586875,
+        "arrive": "12:38",
+        "depart": "12:48"
+      },
+      {
+        "name": "Виктор Цой",
+        "item": "place",
+        "found": true,
+        "lat": 59.9337557,
+        "lon": 30.3577616,
+        "arrive": "12:57",
+        "depart": "13:07"
+      },
+      {
+        "name": "B.B. King",
+        "item": "place",
+        "found": true,
+        "lat": 59.9336033,
+        "lon": 30.36492,
+        "arrive": "13:16",
+        "depart": "13:26"
+      },
+      {
+        "name": "Дом Бассейного товарищества",
+        "item": "place",
+        "found": true,
+        "lat": 59.938444,
+        "lon": 30.368139,
+        "arrive": "13:36",
+        "depart": "13:56"
+      },
+      {
+        "name": "Фреска Иоганн Бах",
+        "item": "place",
+        "found": true,
+        "lat": 59.937589,
+        "lon": 30.359028,
+        "arrive": "14:05",
+        "depart": "14:15"
+      },
+      {
+        "name": "Леший",
+        "item": "place",
+        "found": true,
+        "lat": 59.9365932,
+        "lon": 30.3506321,
+        "arrive": "14:25",
+        "depart": "14:35"
+      },
+      {
+        "name": "Дом-коммуна инженеров и писателей",
+        "item": "place",
+        "found": true,
+        "lat": 59.9312,
+        "lon": 30.3448,
+        "arrive": "14:48",
+        "depart": "15:13"
+      },
+      {
+        "name": "Пышечная на Большой Конюшенной",
+        "item": "place",
+        "found": true,
+        "lat": 59.93756,
+        "lon": 30.32247,
+        "arrive": "15:37",
+        "depart": "16:02"
+      },
+      {
+        "name": "Булочная-кондитерская «Чорек»",
+        "item": "place",
+        "found": true,
+        "lat": 59.93989,
+        "lon": 30.32359,
+        "arrive": "16:06",
+        "depart": "16:31"
+      }
+    ],
+    "brief": {
+      "city": "Санкт-Петербург",
+      "country": "Россия",
+      "language": "ru",
+      "date": "2026-10-24",
+      "date_to": null,
+      "start_time": "11:00:00",
+      "end_time": "18:00:00",
+      "start_point": "Московский вокзал",
+      "interests": [
+        {
+          "label": "конструктивизм",
+          "weight": 1.0,
+          "source": "request"
+        },
+        {
+          "label": "стрит-арт",
+          "weight": 1.0,
+          "source": "request"
+        },
+        {
+          "label": "уличная еда",
+          "weight": 0.7,
+          "source": "request"
+        }
+      ],
+      "avoid": [
+        "музеи"
+      ],
+      "pace": "normal",
+      "with_kids": false,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": null
+    },
+    "start": {
+      "lat": 59.9293565,
+      "lon": 30.3623224,
+      "label": "Московский вокзал"
+    },
     "baseline": {
       "stops": 11,
-      "found": 7,
+      "found": 5,
       "closed": 0,
-      "impossible_legs": 2,
+      "impossible_legs": 1,
       "over_window": false,
-      "walk_km": 18.5,
+      "walk_km": 6.0,
       "avoid_hits": 0,
       "interests_covered": null,
       "interests_total": null,
       "llm_calls": 1,
       "cost_usd": 0.0005,
-      "seconds": 35.0,
-      "mean_pop": 0.65,
-      "top_share": 0.09
+      "seconds": 38.7,
+      "mean_pop": 0.71,
+      "top_share": 0.09,
+      "prompt_tokens": 928,
+      "completion_tokens": 856,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 1,
+      "places": 4,
+      "places_found": 2,
+      "vague": 7
     },
     "baseline_stops": [
       "Московский вокзал",
-      "Дом Советов (Дом Ленсовета) на пл. Восстания",
-      "Стрит-арт на Лиговском проспекте",
-      "Фудмаркет и уличная еда на Суворовском проспекте",
-      "Дом Бенуа (Кинотеатр «Баррикада»)",
-      "Доходный дом Гинзбурга (Пушкинская ул.)",
-      "Стрит-арт в районе Фонтанки и Пушкинской",
-      "Ленинградская пекарня и обед на улице Рубинштейна",
-      "Здание Сибирского банка (Кирочная ул.)",
-      "Стрит-арт и уличная еда в Коломне",
-      "Завершение маршрута у Крюкова канала"
+      "Площадь Восстания и здание Московского вокзала (конструктивистские фасады)",
+      "Дом Советов на Лиговском проспекте (конструктивизм)",
+      "Стрит-арт на улице Марата и в переулках у Лиговки",
+      "Уличная еда на Меновом дворе (фудхолл и стрит-фуд)",
+      "Конструктивистские жилые дома на Ленинском проспекте и Тракторном",
+      "Стрит-арт в районе Ломоносова и Старо-Петергофского",
+      "Конструктивистский дом Бальнеологического института (Пискарёвский район, по возможности) / Дом быта на Московском проспекте",
+      "Уличная еда и перекус на Гороховой (Кофейня и стрит-фуд)",
+      "Стрит-арт и граффити на Пушкинской и Коломенской улицах",
+      "Финальная точка: набережная Фонтанки у Московского вокзала"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Московский вокзал",
+        "item": "place",
+        "found": true,
+        "lat": 59.9293565,
+        "lon": 30.3623224,
+        "arrive": "11:00",
+        "depart": "11:15"
+      },
+      {
+        "name": "Площадь Восстания и здание Московского вокзала (конструктивистские фасады)",
+        "item": "area",
+        "found": true,
+        "lat": 59.9299928,
+        "lon": 30.3590236,
+        "arrive": "11:15",
+        "depart": "11:35"
+      },
+      {
+        "name": "Дом Советов на Лиговском проспекте (конструктивизм)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "11:45",
+        "depart": "12:05"
+      },
+      {
+        "name": "Стрит-арт на улице Марата и в переулках у Лиговки",
+        "item": "area",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:10",
+        "depart": "12:40"
+      },
+      {
+        "name": "Уличная еда на Меновом дворе (фудхолл и стрит-фуд)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:50",
+        "depart": "13:40"
+      },
+      {
+        "name": "Конструктивистские жилые дома на Ленинском проспекте и Тракторном",
+        "item": "area",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "13:50",
+        "depart": "14:20"
+      },
+      {
+        "name": "Стрит-арт в районе Ломоносова и Старо-Петергофского",
+        "item": "area",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "14:30",
+        "depart": "15:00"
+      },
+      {
+        "name": "Конструктивистский дом Бальнеологического института (Пискарёвский район, по возможности) / Дом быта на Московском проспекте",
+        "item": "alternatives",
+        "found": true,
+        "lat": 59.927384,
+        "lon": 30.363315,
+        "arrive": "15:15",
+        "depart": "15:45"
+      },
+      {
+        "name": "Уличная еда и перекус на Гороховой (Кофейня и стрит-фуд)",
+        "item": "place",
+        "found": true,
+        "lat": 59.9334178,
+        "lon": 30.3147168,
+        "arrive": "16:00",
+        "depart": "16:45"
+      },
+      {
+        "name": "Стрит-арт и граффити на Пушкинской и Коломенской улицах",
+        "item": "area",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "16:55",
+        "depart": "17:30"
+      },
+      {
+        "name": "Финальная точка: набережная Фонтанки у Московского вокзала",
+        "item": "endpoint",
+        "found": true,
+        "lat": 59.9262108,
+        "lon": 30.3312884,
+        "arrive": "17:40",
+        "depart": "18:00"
+      }
     ]
   },
   {
@@ -70,55 +347,258 @@
     "model": "anthropic/claude-haiku-5.5",
     "brief_avoid": [],
     "agent": {
-      "stops": 8,
-      "found": 8,
+      "stops": 7,
+      "found": 7,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 4.2,
+      "walk_km": 3.4,
       "avoid_hits": 0,
       "interests_covered": 3,
       "interests_total": 3,
       "llm_calls": 6,
-      "cost_usd": 0.0086,
-      "seconds": 41.5,
-      "mean_pop": 0.63,
-      "top_share": 0.25
+      "cost_usd": 0.007,
+      "seconds": 24.0,
+      "mean_pop": 0.61,
+      "top_share": 0.29,
+      "prompt_tokens": 51174,
+      "completion_tokens": 3765,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 7,
+      "places_found": 7,
+      "vague": 0
     },
     "agent_stops": [
-      "Зимняя канавка",
-      "Тройной мост",
       "Дворцовая набережная",
       "Вид с Дворцового моста на Зимний Дворец",
       "Дворцовый мост",
-      "Зоологический музей",
       "Музей антропологии и этнографии имени Петра Великого Российской Академии наук",
-      "Сфинксы на Университетской набережной"
+      "Зоологический музей",
+      "Эрмитажный мост",
+      "Пантелеймоновский мост"
     ],
+    "agent_detail": [
+      {
+        "name": "Дворцовая набережная",
+        "item": "place",
+        "found": true,
+        "lat": 59.9415139,
+        "lon": 30.3134056,
+        "arrive": "10:05",
+        "depart": "10:30"
+      },
+      {
+        "name": "Вид с Дворцового моста на Зимний Дворец",
+        "item": "place",
+        "found": true,
+        "lat": 59.9410186,
+        "lon": 30.3087045,
+        "arrive": "10:35",
+        "depart": "10:50"
+      },
+      {
+        "name": "Дворцовый мост",
+        "item": "place",
+        "found": true,
+        "lat": 59.94111,
+        "lon": 30.308475,
+        "arrive": "10:51",
+        "depart": "11:16"
+      },
+      {
+        "name": "Музей антропологии и этнографии имени Петра Великого Российской Академии наук",
+        "item": "place",
+        "found": true,
+        "lat": 59.9415303,
+        "lon": 30.3042545,
+        "arrive": "11:26",
+        "depart": "12:26"
+      },
+      {
+        "name": "Зоологический музей",
+        "item": "place",
+        "found": true,
+        "lat": 59.9428418,
+        "lon": 30.3056749,
+        "arrive": "12:29",
+        "depart": "13:29"
+      },
+      {
+        "name": "Эрмитажный мост",
+        "item": "place",
+        "found": true,
+        "lat": 59.9426806,
+        "lon": 30.3168333,
+        "arrive": "13:43",
+        "depart": "13:53"
+      },
+      {
+        "name": "Пантелеймоновский мост",
+        "item": "place",
+        "found": true,
+        "lat": 59.94222,
+        "lon": 30.33861,
+        "arrive": "14:14",
+        "depart": "14:29"
+      }
+    ],
+    "brief": {
+      "city": "Санкт-Петербург",
+      "country": "Россия",
+      "language": "ru",
+      "date": "2026-10-25",
+      "date_to": null,
+      "start_time": "10:00:00",
+      "end_time": "15:00:00",
+      "start_point": "Эрмитаж",
+      "interests": [
+        {
+          "label": "Мосты",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Набережные и вода",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Интерактивное",
+          "weight": 0.7,
+          "source": "request"
+        }
+      ],
+      "avoid": [],
+      "pace": "normal",
+      "with_kids": true,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": "Прогулка с ребёнком 8 лет."
+    },
+    "start": {
+      "lat": 59.9412076,
+      "lon": 30.3154865,
+      "label": "Государственный Эрмитаж"
+    },
     "baseline": {
-      "stops": 7,
-      "found": 6,
+      "stops": 9,
+      "found": 7,
       "closed": 0,
       "impossible_legs": 3,
       "over_window": false,
-      "walk_km": 5.6,
+      "walk_km": 9.2,
       "avoid_hits": 0,
       "interests_covered": null,
       "interests_total": null,
       "llm_calls": 1,
-      "cost_usd": 0.0003,
-      "seconds": 18.3,
-      "mean_pop": 0.6,
-      "top_share": 0.0
+      "cost_usd": 0.0004,
+      "seconds": 25.9,
+      "mean_pop": null,
+      "top_share": 0.0,
+      "prompt_tokens": 924,
+      "completion_tokens": 605,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 3,
+      "places": 5,
+      "places_found": 4,
+      "vague": 4
     },
     "baseline_stops": [
-      "Эрмитаж (старт, Дворцовая площадь)",
-      "Дворцовый мост и набережная Невы",
-      "Иоанновский мост и Петропавловская крепость (Заячий остров)",
-      "Нева и Стрелка Васильевского острова, Ростральные колонны",
-      "Музей Зоологический (интерактивная экспозиция для детей)",
-      "Благовещенский мост и набережная Мойки",
-      "Банковский мостик и Канал Грибоедова"
+      "Эрмитаж (Дворцовая площадь)",
+      "Дворцовый мост и Нева",
+      "Набережная Адмиралтейства и Зимняя канавка",
+      "Мост Ломоносова и Банковский мост (Львиный мост)",
+      "Интерактивный музей «Эрмитаж-Ребёнок» / Детский музей «Игры разума»",
+      "Обед в кафе на Малой Садовой",
+      "Прогулка по Фонтанке и Аничков мост с конями",
+      "Набережная Фонтанки и Цепной мост",
+      "Прощание на Невской набережной у Исаакиевского собора"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Эрмитаж (Дворцовая площадь)",
+        "item": "place",
+        "found": true,
+        "lat": 59.9414451,
+        "lon": 30.3122928,
+        "arrive": "10:00",
+        "depart": "10:30"
+      },
+      {
+        "name": "Дворцовый мост и Нева",
+        "item": "place",
+        "found": true,
+        "lat": 59.9411768,
+        "lon": 30.3081001,
+        "arrive": "10:35",
+        "depart": "10:50"
+      },
+      {
+        "name": "Набережная Адмиралтейства и Зимняя канавка",
+        "item": "area",
+        "found": true,
+        "lat": 59.9311957,
+        "lon": 30.306033,
+        "arrive": "10:55",
+        "depart": "11:15"
+      },
+      {
+        "name": "Мост Ломоносова и Банковский мост (Львиный мост)",
+        "item": "place",
+        "found": true,
+        "lat": 59.931016,
+        "lon": 30.3235535,
+        "arrive": "11:20",
+        "depart": "11:40"
+      },
+      {
+        "name": "Интерактивный музей «Эрмитаж-Ребёнок» / Детский музей «Игры разума»",
+        "item": "alternatives",
+        "found": true,
+        "lat": 59.938732,
+        "lon": 30.316229,
+        "arrive": "11:45",
+        "depart": "12:45"
+      },
+      {
+        "name": "Обед в кафе на Малой Садовой",
+        "item": "activity",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:50",
+        "depart": "13:40"
+      },
+      {
+        "name": "Прогулка по Фонтанке и Аничков мост с конями",
+        "item": "place",
+        "found": true,
+        "lat": 59.9331874,
+        "lon": 30.3433516,
+        "arrive": "13:50",
+        "depart": "14:20"
+      },
+      {
+        "name": "Набережная Фонтанки и Цепной мост",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "14:25",
+        "depart": "14:45"
+      },
+      {
+        "name": "Прощание на Невской набережной у Исаакиевского собора",
+        "item": "endpoint",
+        "found": true,
+        "lat": 59.931979,
+        "lon": 30.3078147,
+        "arrive": "14:50",
+        "depart": "15:00"
+      }
     ]
   },
   {
@@ -129,60 +609,296 @@
       "ВДНХ"
     ],
     "agent": {
-      "stops": 11,
-      "found": 11,
+      "stops": 10,
+      "found": 10,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 4.3,
+      "walk_km": 4.4,
       "avoid_hits": 0,
       "interests_covered": 2,
       "interests_total": 2,
       "llm_calls": 5,
-      "cost_usd": 0.0056,
-      "seconds": 24.1,
+      "cost_usd": 0.0058,
+      "seconds": 23.8,
       "mean_pop": null,
-      "top_share": 0.0
+      "top_share": 0.0,
+      "prompt_tokens": 33331,
+      "completion_tokens": 4863,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 10,
+      "places_found": 10,
+      "vague": 0
     },
     "agent_stops": [
       "Coffee Buro",
-      "Кафе «Монастырская выпечка»",
-      "Арбаткнига",
-      "Благочестiе",
-      "Ходасевич",
-      "Люди и вещи",
-      "Coffee Cona",
       "Cofix",
       "Кулинарная лавка братьев Караваевых",
       "Озеро",
-      "Гиперион"
+      "Гиперион",
+      "Люди и вещи",
+      "Благочестiе",
+      "Арбаткнига",
+      "Республика",
+      "Кафе «Монастырская выпечка»"
     ],
+    "agent_detail": [
+      {
+        "name": "Coffee Buro",
+        "item": "place",
+        "found": true,
+        "lat": 55.7532864,
+        "lon": 37.633726,
+        "arrive": "12:02",
+        "depart": "12:32"
+      },
+      {
+        "name": "Cofix",
+        "item": "place",
+        "found": true,
+        "lat": 55.7540556,
+        "lon": 37.636764,
+        "arrive": "12:35",
+        "depart": "12:55"
+      },
+      {
+        "name": "Кулинарная лавка братьев Караваевых",
+        "item": "place",
+        "found": true,
+        "lat": 55.7536975,
+        "lon": 37.6373394,
+        "arrive": "12:56",
+        "depart": "13:36"
+      },
+      {
+        "name": "Озеро",
+        "item": "place",
+        "found": true,
+        "lat": 55.7528064,
+        "lon": 37.64258,
+        "arrive": "13:41",
+        "depart": "14:11"
+      },
+      {
+        "name": "Гиперион",
+        "item": "place",
+        "found": true,
+        "lat": 55.755078,
+        "lon": 37.6453974,
+        "arrive": "14:18",
+        "depart": "14:48"
+      },
+      {
+        "name": "Люди и вещи",
+        "item": "place",
+        "found": true,
+        "lat": 55.7564493,
+        "lon": 37.6393211,
+        "arrive": "14:56",
+        "depart": "15:36"
+      },
+      {
+        "name": "Благочестiе",
+        "item": "place",
+        "found": true,
+        "lat": 55.7590831,
+        "lon": 37.6342363,
+        "arrive": "15:45",
+        "depart": "16:10"
+      },
+      {
+        "name": "Арбаткнига",
+        "item": "place",
+        "found": true,
+        "lat": 55.7596912,
+        "lon": 37.6291729,
+        "arrive": "16:20",
+        "depart": "16:50"
+      },
+      {
+        "name": "Республика",
+        "item": "place",
+        "found": true,
+        "lat": 55.7549259,
+        "lon": 37.621192,
+        "arrive": "17:03",
+        "depart": "17:33"
+      },
+      {
+        "name": "Кафе «Монастырская выпечка»",
+        "item": "place",
+        "found": true,
+        "lat": 55.75276,
+        "lon": 37.6286,
+        "arrive": "17:43",
+        "depart": "18:28"
+      }
+    ],
+    "brief": {
+      "city": "Москва",
+      "country": "Россия",
+      "language": "ru",
+      "date": "2026-10-24",
+      "date_to": null,
+      "start_time": "12:00:00",
+      "end_time": "19:00:00",
+      "start_point": "метро Китай-город",
+      "interests": [
+        {
+          "label": "Кофейни и выпечка",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Книжные магазины",
+          "weight": 0.7,
+          "source": "request"
+        }
+      ],
+      "avoid": [
+        "Советский модернизм",
+        "ВДНХ"
+      ],
+      "pace": "normal",
+      "with_kids": false,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": "Советский модернизм и ВДНХ не обязательны, а не исключены полностью; стоит мягко учитывать это при выборе маршрута."
+    },
+    "start": {
+      "lat": 55.7539838,
+      "lon": 37.6342799,
+      "label": "Метро «Китай-город»"
+    },
     "baseline": {
-      "stops": 9,
-      "found": 9,
-      "closed": 0,
-      "impossible_legs": 4,
+      "stops": 10,
+      "found": 2,
+      "closed": 1,
+      "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 14.0,
+      "walk_km": 1.5,
       "avoid_hits": 0,
       "interests_covered": null,
       "interests_total": null,
       "llm_calls": 1,
       "cost_usd": 0.0004,
-      "seconds": 33.4,
-      "mean_pop": 0.54,
-      "top_share": 0.0
+      "seconds": 35.6,
+      "mean_pop": null,
+      "top_share": 0.0,
+      "prompt_tokens": 919,
+      "completion_tokens": 659,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 6,
+      "places_found": 0,
+      "vague": 4
     },
     "baseline_stops": [
       "Метро Китай-город (старт, выход к Солянке)",
-      "Кофейня «Пушкинъ» на Солянке",
-      "Книжный магазин «Москва» (Китай-город)",
-      "Кофейня «Кофемания» на Никольской",
-      "Музей «Гараж» (прогулка через Парк Зарядье)",
-      "Книжный магазин «Все свободны» в Парке Горького",
-      "Кофейня «Чайхона №1» в Парке Горького",
-      "Книжный магазин «Республика» на Пятницкой",
-      "Кофейня «Жан-Жак» на Пятницкой"
+      "Книжный магазин «Market Books» (Солянка)",
+      "Кофейня «Coffee Bean» на Покровке",
+      "Книжный магазин «Республика» на Покровке",
+      "Прогулка по Яузе и Таганке",
+      "Кофейня «Кофемания» в Таганском районе",
+      "Книжный магазин «Bookmarket» на Таганке",
+      "Прогулка по Чистым прудам и бульварному кольцу",
+      "Кофейня «Сmarkет» на Чистых прудах",
+      "Завершение маршрута у метро Чистые пруды"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Метро Китай-город (старт, выход к Солянке)",
+        "item": "endpoint",
+        "found": true,
+        "lat": 55.75422,
+        "lon": 37.634245,
+        "arrive": "12:00",
+        "depart": "12:10"
+      },
+      {
+        "name": "Книжный магазин «Market Books» (Солянка)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:15",
+        "depart": "12:45"
+      },
+      {
+        "name": "Кофейня «Coffee Bean» на Покровке",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:55",
+        "depart": "13:40"
+      },
+      {
+        "name": "Книжный магазин «Республика» на Покровке",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "13:50",
+        "depart": "14:20"
+      },
+      {
+        "name": "Прогулка по Яузе и Таганке",
+        "item": "transition",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "14:25",
+        "depart": "14:50"
+      },
+      {
+        "name": "Кофейня «Кофемания» в Таганском районе",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "15:00",
+        "depart": "15:45"
+      },
+      {
+        "name": "Книжный магазин «Bookmarket» на Таганке",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "15:55",
+        "depart": "16:35"
+      },
+      {
+        "name": "Прогулка по Чистым прудам и бульварному кольцу",
+        "item": "transition",
+        "found": true,
+        "lat": 55.7641394,
+        "lon": 37.6375743,
+        "arrive": "16:45",
+        "depart": "17:30"
+      },
+      {
+        "name": "Кофейня «Сmarkет» на Чистых прудах",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "17:35",
+        "depart": "18:30"
+      },
+      {
+        "name": "Завершение маршрута у метро Чистые пруды",
+        "item": "endpoint",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "18:40",
+        "depart": "19:00"
+      }
     ]
   },
   {
@@ -190,60 +906,288 @@
     "model": "anthropic/claude-haiku-5.5",
     "brief_avoid": [],
     "agent": {
-      "stops": 11,
-      "found": 11,
+      "stops": 10,
+      "found": 10,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 4.4,
+      "walk_km": 3.6,
       "avoid_hits": 0,
-      "interests_covered": 4,
-      "interests_total": 4,
+      "interests_covered": 3,
+      "interests_total": 3,
       "llm_calls": 5,
-      "cost_usd": 0.0068,
-      "seconds": 28.5,
-      "mean_pop": 0.57,
-      "top_share": 0.18
+      "cost_usd": 0.0065,
+      "seconds": 27.4,
+      "mean_pop": 0.48,
+      "top_share": 0.1,
+      "prompt_tokens": 38710,
+      "completion_tokens": 5236,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 10,
+      "places_found": 10,
+      "vague": 0
     },
     "agent_stops": [
-      "Кул-Шариф",
       "Благовещенский собор",
       "Башня Сююмбике",
-      "Авылым",
       "Церковь Параскевы Пятницы",
+      "Авылым",
+      "Спасо-Преображенский собор",
       "Мусе Джалилю",
-      "Петропавловский собор",
-      "Дом татарской кулинарии",
-      "Собор Богоявления Господня",
-      "Мечеть Нурулла",
-      "Галеевская мечеть"
+      "Гостинодворская церковь",
+      "Никольский кафедральный собор",
+      "Кофейня Latte Art",
+      "Кафе «Эдем»"
     ],
+    "agent_detail": [
+      {
+        "name": "Благовещенский собор",
+        "item": "place",
+        "found": true,
+        "lat": 55.799848,
+        "lon": 49.1060415,
+        "arrive": "10:03",
+        "depart": "10:43"
+      },
+      {
+        "name": "Башня Сююмбике",
+        "item": "place",
+        "found": true,
+        "lat": 55.8004758,
+        "lon": 49.105181,
+        "arrive": "10:47",
+        "depart": "11:17"
+      },
+      {
+        "name": "Церковь Параскевы Пятницы",
+        "item": "place",
+        "found": true,
+        "lat": 55.7990902,
+        "lon": 49.1103207,
+        "arrive": "11:30",
+        "depart": "11:50"
+      },
+      {
+        "name": "Авылым",
+        "item": "place",
+        "found": true,
+        "lat": 55.8023172,
+        "lon": 49.1085188,
+        "arrive": "12:00",
+        "depart": "13:00"
+      },
+      {
+        "name": "Спасо-Преображенский собор",
+        "item": "place",
+        "found": true,
+        "lat": 55.7967887,
+        "lon": 49.1067782,
+        "arrive": "13:15",
+        "depart": "13:45"
+      },
+      {
+        "name": "Мусе Джалилю",
+        "item": "place",
+        "found": true,
+        "lat": 55.7961164,
+        "lon": 49.1085208,
+        "arrive": "13:50",
+        "depart": "14:05"
+      },
+      {
+        "name": "Гостинодворская церковь",
+        "item": "place",
+        "found": true,
+        "lat": 55.7946591,
+        "lon": 49.1102117,
+        "arrive": "14:10",
+        "depart": "14:30"
+      },
+      {
+        "name": "Никольский кафедральный собор",
+        "item": "place",
+        "found": true,
+        "lat": 55.7939564,
+        "lon": 49.108931,
+        "arrive": "14:36",
+        "depart": "15:06"
+      },
+      {
+        "name": "Кофейня Latte Art",
+        "item": "place",
+        "found": true,
+        "lat": 55.79237,
+        "lon": 49.11103,
+        "arrive": "15:10",
+        "depart": "15:55"
+      },
+      {
+        "name": "Кафе «Эдем»",
+        "item": "place",
+        "found": true,
+        "lat": 55.78779,
+        "lon": 49.10659,
+        "arrive": "16:05",
+        "depart": "16:50"
+      }
+    ],
+    "brief": {
+      "city": "Казань",
+      "country": "Россия",
+      "language": "ru",
+      "date": "2026-10-25",
+      "date_to": null,
+      "start_time": "10:00:00",
+      "end_time": "17:00:00",
+      "start_point": "Кремль",
+      "interests": [
+        {
+          "label": "История",
+          "weight": 1.0,
+          "source": "request"
+        },
+        {
+          "label": "Храмы",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Местная еда",
+          "weight": 0.7,
+          "source": "request"
+        }
+      ],
+      "avoid": [],
+      "pace": "normal",
+      "with_kids": false,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": "Татарская кухня на обед; мечети и церкви"
+    },
+    "start": {
+      "lat": 55.7990218,
+      "lon": 49.1061691,
+      "label": "Казанский кремль"
+    },
     "baseline": {
       "stops": 9,
       "found": 8,
       "closed": 0,
       "impossible_legs": 5,
       "over_window": false,
-      "walk_km": 17.1,
+      "walk_km": 17.3,
       "avoid_hits": 0,
       "interests_covered": null,
       "interests_total": null,
       "llm_calls": 1,
-      "cost_usd": 0.0004,
-      "seconds": 18.4,
+      "cost_usd": 0.0003,
+      "seconds": 13.3,
       "mean_pop": 0.64,
-      "top_share": 0.11
+      "top_share": 0.22,
+      "prompt_tokens": 901,
+      "completion_tokens": 518,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 2,
+      "places": 6,
+      "places_found": 6,
+      "vague": 3
     },
     "baseline_stops": [
-      "Казанский Кремль (старт, Спасская башня)",
-      "Мечеть Кул Шариф",
+      "Казанский Кремль (Спасская башня, старт)",
+      "Мечеть Кул-Шариф",
       "Благовещенский собор",
-      "Улица Баумана (прогулка, история купечества)",
-      "Ресторан «Чак-Чак» (обед, татарская кухня)",
+      "Улица Баумана",
+      "Ресторан татарской кухни «Тюбетейка»",
+      "Церковь Параскевы Пятницы",
       "Мечеть Марджани",
-      "Петропавловский собор",
-      "Соборная мечеть Казани (Мечеть Ярдэм)",
-      "Набережная Казанки и Казанский кремль (финальная прогулка)"
+      "Казанский университет (главный корпус)",
+      "Набережная Казанки у Кремля (завершение)"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Казанский Кремль (Спасская башня, старт)",
+        "item": "endpoint",
+        "found": true,
+        "lat": 55.7990218,
+        "lon": 49.1061691,
+        "arrive": "10:00",
+        "depart": "10:40"
+      },
+      {
+        "name": "Мечеть Кул-Шариф",
+        "item": "place",
+        "found": true,
+        "lat": 55.7930611,
+        "lon": 49.1679931,
+        "arrive": "10:45",
+        "depart": "11:20"
+      },
+      {
+        "name": "Благовещенский собор",
+        "item": "place",
+        "found": true,
+        "lat": 55.7998493,
+        "lon": 49.1060246,
+        "arrive": "11:25",
+        "depart": "11:50"
+      },
+      {
+        "name": "Улица Баумана",
+        "item": "area",
+        "found": true,
+        "lat": 55.79242,
+        "lon": 49.111398,
+        "arrive": "12:00",
+        "depart": "12:20"
+      },
+      {
+        "name": "Ресторан татарской кухни «Тюбетейка»",
+        "item": "place",
+        "found": true,
+        "lat": 55.7912515,
+        "lon": 49.1142039,
+        "arrive": "12:30",
+        "depart": "13:50"
+      },
+      {
+        "name": "Церковь Параскевы Пятницы",
+        "item": "place",
+        "found": true,
+        "lat": 55.7990948,
+        "lon": 49.11036,
+        "arrive": "14:10",
+        "depart": "14:40"
+      },
+      {
+        "name": "Мечеть Марджани",
+        "item": "place",
+        "found": true,
+        "lat": 55.7797549,
+        "lon": 49.1180451,
+        "arrive": "14:55",
+        "depart": "15:30"
+      },
+      {
+        "name": "Казанский университет (главный корпус)",
+        "item": "place",
+        "found": true,
+        "lat": 55.7903716,
+        "lon": 49.1207062,
+        "arrive": "15:45",
+        "depart": "16:20"
+      },
+      {
+        "name": "Набережная Казанки у Кремля (завершение)",
+        "item": "endpoint",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "16:30",
+        "depart": "17:00"
+      }
     ]
   },
   {
@@ -256,52 +1200,273 @@
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 9.7,
+      "walk_km": 7.5,
       "avoid_hits": 0,
       "interests_covered": 5,
       "interests_total": 5,
-      "llm_calls": 8,
-      "cost_usd": 0.0141,
-      "seconds": 49.8,
-      "mean_pop": 0.51,
-      "top_share": 0.0
+      "llm_calls": 5,
+      "cost_usd": 0.0073,
+      "seconds": 29.1,
+      "mean_pop": 0.5,
+      "top_share": 0.11,
+      "prompt_tokens": 47844,
+      "completion_tokens": 5117,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 9,
+      "places_found": 9,
+      "vague": 0
     },
     "agent_stops": [
-      "Лев Бородинский",
-      "Собор Христа Спасителя",
-      "Королевский пекарь",
       "Круассан кафе",
-      "Аусфальские ворота",
-      "Крепость Фридрихсбург",
-      "Альтштадтская кирха",
+      "Королевский пекарь",
+      "Сначала кофе",
+      "Кирха Христа (Кёнигсберг)",
       "Росгартенские ворота",
-      "Закхаймские ворота"
+      "Трагхаймская кирха",
+      "Штайндаммская кирха",
+      "Кёнигсбергский собор",
+      "Фридрихсбургские ворота"
     ],
+    "agent_detail": [
+      {
+        "name": "Круассан кафе",
+        "item": "place",
+        "found": true,
+        "lat": 54.7205737,
+        "lon": 20.5006757,
+        "arrive": "11:03",
+        "depart": "11:33"
+      },
+      {
+        "name": "Королевский пекарь",
+        "item": "place",
+        "found": true,
+        "lat": 54.7225981,
+        "lon": 20.4995386,
+        "arrive": "11:38",
+        "depart": "11:58"
+      },
+      {
+        "name": "Сначала кофе",
+        "item": "place",
+        "found": true,
+        "lat": 54.721208,
+        "lon": 20.506193,
+        "arrive": "12:08",
+        "depart": "12:48"
+      },
+      {
+        "name": "Кирха Христа (Кёнигсберг)",
+        "item": "place",
+        "found": true,
+        "lat": 54.72167,
+        "lon": 20.51083,
+        "arrive": "12:54",
+        "depart": "13:09"
+      },
+      {
+        "name": "Росгартенские ворота",
+        "item": "place",
+        "found": true,
+        "lat": 54.72210833,
+        "lon": 20.52418056,
+        "arrive": "13:25",
+        "depart": "13:45"
+      },
+      {
+        "name": "Трагхаймская кирха",
+        "item": "place",
+        "found": true,
+        "lat": 54.7178833,
+        "lon": 20.5079361,
+        "arrive": "14:06",
+        "depart": "14:26"
+      },
+      {
+        "name": "Штайндаммская кирха",
+        "item": "place",
+        "found": true,
+        "lat": 54.7165028,
+        "lon": 20.5053972,
+        "arrive": "14:33",
+        "depart": "14:53"
+      },
+      {
+        "name": "Кёнигсбергский собор",
+        "item": "place",
+        "found": true,
+        "lat": 54.7063528,
+        "lon": 20.511778,
+        "arrive": "15:15",
+        "depart": "15:55"
+      },
+      {
+        "name": "Фридрихсбургские ворота",
+        "item": "place",
+        "found": true,
+        "lat": 54.704472,
+        "lon": 20.493356,
+        "arrive": "16:17",
+        "depart": "16:42"
+      }
+    ],
+    "brief": {
+      "city": "Калининград",
+      "country": "Россия",
+      "language": "ru",
+      "date": "2026-10-24",
+      "date_to": null,
+      "start_time": "11:00:00",
+      "end_time": "17:00:00",
+      "start_point": "Кафедральный собор",
+      "interests": [
+        {
+          "label": "Форты",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Ворота",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Кирхи",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Остатки Кёнигсберга",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Кофейни и выпечка",
+          "weight": 0.7,
+          "source": "request"
+        }
+      ],
+      "avoid": [],
+      "pace": "normal",
+      "with_kids": false,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": null
+    },
+    "start": {
+      "lat": 54.7208163,
+      "lon": 20.5031669,
+      "label": "Собор Христа Спасителя"
+    },
     "baseline": {
       "stops": 8,
-      "found": 6,
+      "found": 2,
       "closed": 0,
-      "impossible_legs": 4,
+      "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 21.7,
+      "walk_km": 2.9,
       "avoid_hits": 0,
       "interests_covered": null,
       "interests_total": null,
       "llm_calls": 1,
-      "cost_usd": 0.0003,
-      "seconds": 25.5,
-      "mean_pop": 0.62,
-      "top_share": 0.0
+      "cost_usd": 0.0004,
+      "seconds": 22.2,
+      "mean_pop": 0.61,
+      "top_share": 0.0,
+      "prompt_tokens": 926,
+      "completion_tokens": 532,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 8,
+      "places_found": 2,
+      "vague": 0
     },
     "baseline_stops": [
       "Кафедральный собор (Кёнигсбергский собор)",
       "Могила Иммануила Канта",
-      "Кофейня с выпечкой «Кёнигсберг» (кофе и пирожные)",
-      "Ворота Фридландер Тор (Фридландские ворота)",
-      "Форт №5 «Королева Луиза»",
-      "Кирха Святой Марии (руины)",
-      "Рыбная деревня и Ворота Гольдингер Тор",
-      "Кофейня у Ворот «Кофемания» (завершение маршрута)"
+      "Кофейня Kuchen Haus (кофе и выпечка)",
+      "Королевские ворота (Королевские ворота Кёнигсберга)",
+      "Пороховая башня (Dohna-Turm)",
+      "Форт №5 Гросс Фридрихсбург",
+      "Кирха Королевского замка (Кирха Святой Марии Ледяной)",
+      "Кофейня Vipe (кофе и выпечка)"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Кафедральный собор (Кёнигсбергский собор)",
+        "item": "place",
+        "found": true,
+        "lat": 54.7208163,
+        "lon": 20.5031669,
+        "arrive": "11:00",
+        "depart": "11:30"
+      },
+      {
+        "name": "Могила Иммануила Канта",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "11:30",
+        "depart": "11:45"
+      },
+      {
+        "name": "Кофейня Kuchen Haus (кофе и выпечка)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "11:50",
+        "depart": "12:30"
+      },
+      {
+        "name": "Королевские ворота (Королевские ворота Кёнигсберга)",
+        "item": "place",
+        "found": true,
+        "lat": 54.7137479,
+        "lon": 20.5359966,
+        "arrive": "12:40",
+        "depart": "13:05"
+      },
+      {
+        "name": "Пороховая башня (Dohna-Turm)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "13:15",
+        "depart": "13:40"
+      },
+      {
+        "name": "Форт №5 Гросс Фридрихсбург",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "14:00",
+        "depart": "15:00"
+      },
+      {
+        "name": "Кирха Королевского замка (Кирха Святой Марии Ледяной)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "15:20",
+        "depart": "15:50"
+      },
+      {
+        "name": "Кофейня Vipe (кофе и выпечка)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "16:00",
+        "depart": "16:50"
+      }
     ]
   },
   {
@@ -314,54 +1479,298 @@
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 4.9,
+      "walk_km": 5.1,
       "avoid_hits": 0,
       "interests_covered": 4,
       "interests_total": 4,
       "llm_calls": 6,
-      "cost_usd": 0.0077,
-      "seconds": 26.7,
-      "mean_pop": 0.44,
-      "top_share": 0.0
+      "cost_usd": 0.0091,
+      "seconds": 31.8,
+      "mean_pop": 0.45,
+      "top_share": 0.09,
+      "prompt_tokens": 65900,
+      "completion_tokens": 5011,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 11,
+      "places_found": 11,
+      "vague": 0
     },
     "agent_stops": [
-      "Площадь Минина и Пожарского",
-      "Дом М. А. Костромина",
-      "Арт-объект \"Рельсы\"",
-      "Высота",
-      "Дом купчихи М. И. Бочкарёвой с благотворительными учреждениями",
-      "Беспризорники",
+      "Арсенал (центр современного искусства)",
       "Спасо-Преображенская колокольня",
-      "Чкаловская лестница",
+      "Нижегородский кремль",
+      "Комплекс банка Рукавишниковых",
+      "Улица Варварская",
+      "Здание правления пароходного общества «Волга»",
+      "Здание пароходного общества \"Волга\"",
+      "Чкаловская лестница (Нижний Новгород)",
       "Дом Сироткина (Верхне-Волжская набережная)",
       "Усадьба С. М. Рукавишникова",
       "Особняк Каменской"
     ],
+    "agent_detail": [
+      {
+        "name": "Арсенал (центр современного искусства)",
+        "item": "place",
+        "found": true,
+        "lat": 56.328077,
+        "lon": 44.006538,
+        "arrive": "12:05",
+        "depart": "12:45"
+      },
+      {
+        "name": "Спасо-Преображенская колокольня",
+        "item": "place",
+        "found": true,
+        "lat": 56.3286231,
+        "lon": 44.0048761,
+        "arrive": "12:49",
+        "depart": "13:04"
+      },
+      {
+        "name": "Нижегородский кремль",
+        "item": "place",
+        "found": true,
+        "lat": 56.3282428,
+        "lon": 44.0031209,
+        "arrive": "13:09",
+        "depart": "13:59"
+      },
+      {
+        "name": "Комплекс банка Рукавишниковых",
+        "item": "place",
+        "found": true,
+        "lat": 56.33003,
+        "lon": 43.992819,
+        "arrive": "14:12",
+        "depart": "14:27"
+      },
+      {
+        "name": "Улица Варварская",
+        "item": "place",
+        "found": true,
+        "lat": 56.323914,
+        "lon": 44.00936,
+        "arrive": "14:48",
+        "depart": "15:08"
+      },
+      {
+        "name": "Здание правления пароходного общества «Волга»",
+        "item": "place",
+        "found": true,
+        "lat": 56.3294,
+        "lon": 44.0094,
+        "arrive": "15:18",
+        "depart": "15:33"
+      },
+      {
+        "name": "Здание пароходного общества \"Волга\"",
+        "item": "place",
+        "found": true,
+        "lat": 56.3294998,
+        "lon": 44.0093552,
+        "arrive": "15:34",
+        "depart": "15:44"
+      },
+      {
+        "name": "Чкаловская лестница (Нижний Новгород)",
+        "item": "place",
+        "found": true,
+        "lat": 56.33083,
+        "lon": 44.00944,
+        "arrive": "15:48",
+        "depart": "16:23"
+      },
+      {
+        "name": "Дом Сироткина (Верхне-Волжская набережная)",
+        "item": "place",
+        "found": true,
+        "lat": 56.3293,
+        "lon": 44.0128,
+        "arrive": "16:30",
+        "depart": "16:45"
+      },
+      {
+        "name": "Усадьба С. М. Рукавишникова",
+        "item": "place",
+        "found": true,
+        "lat": 56.329304,
+        "lon": 44.01611,
+        "arrive": "16:50",
+        "depart": "17:30"
+      },
+      {
+        "name": "Особняк Каменской",
+        "item": "place",
+        "found": true,
+        "lat": 56.32743,
+        "lon": 44.024135,
+        "arrive": "17:38",
+        "depart": "17:53"
+      }
+    ],
+    "brief": {
+      "city": "Нижний Новгород",
+      "country": "Россия",
+      "language": "ru",
+      "date": "2026-10-25",
+      "date_to": null,
+      "start_time": "12:00:01",
+      "end_time": "18:00:00",
+      "start_point": "площадь Минина",
+      "interests": [
+        {
+          "label": "Смотровые площадки",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Виды на Волгу",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Купеческие особняки",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Стрит-арт",
+          "weight": 0.4,
+          "source": "request"
+        }
+      ],
+      "avoid": [],
+      "pace": "normal",
+      "with_kids": false,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": null
+    },
+    "start": {
+      "lat": 56.3277658,
+      "lon": 44.0070619,
+      "label": "площадь Минина и Пожарского"
+    },
     "baseline": {
-      "stops": 8,
-      "found": 7,
-      "closed": 0,
-      "impossible_legs": 3,
+      "stops": 9,
+      "found": 3,
+      "closed": 1,
+      "impossible_legs": 1,
       "over_window": false,
-      "walk_km": 9.0,
+      "walk_km": 3.0,
       "avoid_hits": 0,
       "interests_covered": null,
       "interests_total": null,
       "llm_calls": 1,
       "cost_usd": 0.0004,
-      "seconds": 25.5,
+      "seconds": 16.0,
       "mean_pop": null,
-      "top_share": 0.0
+      "top_share": 0.0,
+      "prompt_tokens": 922,
+      "completion_tokens": 597,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 1,
+      "places": 6,
+      "places_found": 1,
+      "vague": 3
     },
     "baseline_stops": [
       "Площадь Минина и Пожарского",
-      "Нижегородский кремль, Дмитриевская башня и смотровая площадка",
-      "Чкаловская лестница и смотровая площадка на Волгу",
-      "Большая Покровская улица, купеческие особняки",
-      "Дом Бугрова и особняки Рождественской улицы",
-      "Стрит-арт на улице Рождественской и Большой Покровской",
-      "Откос Федоровского и смотровая площадка",
-      "Набережная Федоровского откоса и вид на Волгу"
+      "Нижегородский кремль, Дмитриевская башня",
+      "Смотровая площадка Чкаловской лестницы",
+      "Стрит-арт на улице Рождественская и Большая Покровская",
+      "Купеческие особняки на улице Большая Покровская",
+      "Особняк Рукавишникова",
+      "Стрит-арт в районе Верхне-Волжской набережной",
+      "Смотровая площадка на Откосе Федоровского",
+      "Набережная Федоровского, вид на Волгу и Оку"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Площадь Минина и Пожарского",
+        "item": "place",
+        "found": true,
+        "lat": 56.3287467,
+        "lon": 44.0080135,
+        "arrive": "12:00",
+        "depart": "12:30"
+      },
+      {
+        "name": "Нижегородский кремль, Дмитриевская башня",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:40",
+        "depart": "13:20"
+      },
+      {
+        "name": "Смотровая площадка Чкаловской лестницы",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "13:30",
+        "depart": "13:50"
+      },
+      {
+        "name": "Стрит-арт на улице Рождественская и Большая Покровская",
+        "item": "area",
+        "found": true,
+        "lat": 56.3283068,
+        "lon": 43.9884895,
+        "arrive": "14:00",
+        "depart": "14:40"
+      },
+      {
+        "name": "Купеческие особняки на улице Большая Покровская",
+        "item": "area",
+        "found": true,
+        "lat": 56.3243867,
+        "lon": 44.0030297,
+        "arrive": "14:45",
+        "depart": "15:30"
+      },
+      {
+        "name": "Особняк Рукавишникова",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "15:35",
+        "depart": "16:05"
+      },
+      {
+        "name": "Стрит-арт в районе Верхне-Волжской набережной",
+        "item": "area",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "16:15",
+        "depart": "16:45"
+      },
+      {
+        "name": "Смотровая площадка на Откосе Федоровского",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "16:50",
+        "depart": "17:20"
+      },
+      {
+        "name": "Набережная Федоровского, вид на Волгу и Оку",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "17:25",
+        "depart": "18:00"
+      }
     ]
   },
   {
@@ -369,37 +1778,176 @@
     "model": "anthropic/claude-haiku-5.5",
     "brief_avoid": [],
     "agent": {
-      "stops": 9,
-      "found": 9,
+      "stops": 10,
+      "found": 10,
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 4.3,
+      "walk_km": 4.6,
       "avoid_hits": 0,
       "interests_covered": 3,
       "interests_total": 3,
-      "llm_calls": 6,
-      "cost_usd": 0.0075,
-      "seconds": 28.6,
-      "mean_pop": 0.36,
-      "top_share": 0.0
+      "llm_calls": 7,
+      "cost_usd": 0.0098,
+      "seconds": 27.6,
+      "mean_pop": 0.42,
+      "top_share": 0.0,
+      "prompt_tokens": 71615,
+      "completion_tokens": 5314,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 10,
+      "places_found": 10,
+      "vague": 0
     },
     "agent_stops": [
-      "Музей архитектуры и дизайна УГАХА",
-      "Государственный центр современного искусства",
-      "Здание Госстраха",
-      "RatsKeller",
-      "Второй Дом Советов",
       "Центр фотографии «Март»",
+      "Второй Дом Советов",
+      "Тёрка",
+      "Doctor Scotch Pub",
+      "Клавиатура",
+      "Штаб Бар",
+      "Граффити \"Бумажный самолетик\"",
       "Дом связи (Екатеринбург)",
       "Дом печати (Екатеринбург)",
       "Дом промышленности (Екатеринбург)"
     ],
+    "agent_detail": [
+      {
+        "name": "Центр фотографии «Март»",
+        "item": "place",
+        "found": true,
+        "lat": 56.840267,
+        "lon": 60.598376,
+        "arrive": "11:11",
+        "depart": "11:51"
+      },
+      {
+        "name": "Второй Дом Советов",
+        "item": "place",
+        "found": true,
+        "lat": 56.8398026,
+        "lon": 60.5975972,
+        "arrive": "11:53",
+        "depart": "12:18"
+      },
+      {
+        "name": "Тёрка",
+        "item": "place",
+        "found": true,
+        "lat": 56.8338498,
+        "lon": 60.6005775,
+        "arrive": "12:28",
+        "depart": "12:38"
+      },
+      {
+        "name": "Doctor Scotch Pub",
+        "item": "place",
+        "found": true,
+        "lat": 56.834507,
+        "lon": 60.6058235,
+        "arrive": "12:43",
+        "depart": "13:28"
+      },
+      {
+        "name": "Клавиатура",
+        "item": "place",
+        "found": true,
+        "lat": 56.8324303,
+        "lon": 60.6075644,
+        "arrive": "13:32",
+        "depart": "13:42"
+      },
+      {
+        "name": "Штаб Бар",
+        "item": "place",
+        "found": true,
+        "lat": 56.83542,
+        "lon": 60.60976,
+        "arrive": "13:50",
+        "depart": "14:35"
+      },
+      {
+        "name": "Граффити \"Бумажный самолетик\"",
+        "item": "place",
+        "found": true,
+        "lat": 56.838288,
+        "lon": 60.6106903,
+        "arrive": "14:41",
+        "depart": "14:51"
+      },
+      {
+        "name": "Дом связи (Екатеринбург)",
+        "item": "place",
+        "found": true,
+        "lat": 56.839351,
+        "lon": 60.608856,
+        "arrive": "14:56",
+        "depart": "15:11"
+      },
+      {
+        "name": "Дом печати (Екатеринбург)",
+        "item": "place",
+        "found": true,
+        "lat": 56.83997,
+        "lon": 60.6145,
+        "arrive": "15:16",
+        "depart": "15:31"
+      },
+      {
+        "name": "Дом промышленности (Екатеринбург)",
+        "item": "place",
+        "found": true,
+        "lat": 56.83718,
+        "lon": 60.62027,
+        "arrive": "15:41",
+        "depart": "16:01"
+      }
+    ],
+    "brief": {
+      "city": "Екатеринбург",
+      "country": "Россия",
+      "language": "ru",
+      "date": "2026-10-24",
+      "date_to": null,
+      "start_time": "11:00:00",
+      "end_time": "17:00:00",
+      "start_point": "Плотинка",
+      "interests": [
+        {
+          "label": "Уральский конструктивизм",
+          "weight": 1.0,
+          "source": "request"
+        },
+        {
+          "label": "Современное искусство",
+          "weight": 1.0,
+          "source": "request"
+        },
+        {
+          "label": "Бары без пафоса",
+          "weight": 0.7,
+          "source": "request"
+        }
+      ],
+      "avoid": [],
+      "pace": "normal",
+      "with_kids": false,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": "Бары вечером, но прогулка заканчивается в 17:00"
+    },
+    "start": {
+      "lat": 56.8363886,
+      "lon": 60.6041792,
+      "label": "Плотинка"
+    },
     "baseline": {
-      "stops": 8,
-      "found": 4,
+      "stops": 9,
+      "found": 5,
       "closed": 0,
-      "impossible_legs": 1,
+      "impossible_legs": 0,
       "over_window": false,
       "walk_km": 4.0,
       "avoid_hits": 0,
@@ -407,19 +1955,111 @@
       "interests_total": null,
       "llm_calls": 1,
       "cost_usd": 0.0004,
-      "seconds": 24.5,
+      "seconds": 25.5,
       "mean_pop": 0.57,
-      "top_share": 0.0
+      "top_share": 0.0,
+      "prompt_tokens": 913,
+      "completion_tokens": 615,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 7,
+      "places_found": 3,
+      "vague": 2
     },
     "baseline_stops": [
-      "Плотинка (Городская набережная, начало маршрута)",
-      "Дом Макарова (Дом Макарова, конструктивизм)",
-      "Дом Севастьянова (Дом Севастьянова, конструктивизм)",
-      "Дом Офицеров (Дом Офицеров, архитектурный ансамбль)",
-      "Ленинский проспект и здание Дома Советов (архитектурные фасады)",
-      "Ельцин Центр (выставки и современное искусство)",
-      "Гоголь-центр Екатеринбург / галерея современного искусства (выставки)",
-      "Кафе и обед в районе Вайнера (без пафоса)"
+      "Плотинка (городская набережная, старт)",
+      "Дом Севастьянова (ул. Ленина / Плотинка)",
+      "Дом Макарова",
+      "Здание ТЮЗа и дом Мамина-Сибиряка",
+      "Дом Коровина и дом Шипилова",
+      "Ельцин Центр",
+      "Обед в районе Ельцин Центра",
+      "Музей УНИКА / Дом Ипатьева пространство современного искусства (ЦСИ Ипатьева)",
+      "Галерея современного искусства Уральского Гоголь-центра (кафе-бар «Сохо» район)"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Плотинка (городская набережная, старт)",
+        "item": "endpoint",
+        "found": true,
+        "lat": 56.8363886,
+        "lon": 60.6041792,
+        "arrive": "11:00",
+        "depart": "11:20"
+      },
+      {
+        "name": "Дом Севастьянова (ул. Ленина / Плотинка)",
+        "item": "place",
+        "found": true,
+        "lat": 56.839198,
+        "lon": 60.606096,
+        "arrive": "11:25",
+        "depart": "11:45"
+      },
+      {
+        "name": "Дом Макарова",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "11:50",
+        "depart": "12:05"
+      },
+      {
+        "name": "Здание ТЮЗа и дом Мамина-Сибиряка",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:10",
+        "depart": "12:30"
+      },
+      {
+        "name": "Дом Коровина и дом Шипилова",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "12:35",
+        "depart": "12:50"
+      },
+      {
+        "name": "Ельцин Центр",
+        "item": "place",
+        "found": true,
+        "lat": 56.8448759,
+        "lon": 60.5911672,
+        "arrive": "13:05",
+        "depart": "14:05"
+      },
+      {
+        "name": "Обед в районе Ельцин Центра",
+        "item": "activity",
+        "found": true,
+        "lat": 56.8453342,
+        "lon": 60.5861536,
+        "arrive": "14:10",
+        "depart": "14:50"
+      },
+      {
+        "name": "Музей УНИКА / Дом Ипатьева пространство современного искусства (ЦСИ Ипатьева)",
+        "item": "place",
+        "found": false,
+        "lat": null,
+        "lon": null,
+        "arrive": "15:00",
+        "depart": "16:00"
+      },
+      {
+        "name": "Галерея современного искусства Уральского Гоголь-центра (кафе-бар «Сохо» район)",
+        "item": "place",
+        "found": true,
+        "lat": 56.8348148,
+        "lon": 60.5957175,
+        "arrive": "16:10",
+        "depart": "17:00"
+      }
     ]
   },
   {
@@ -435,51 +2075,246 @@
       "closed": 0,
       "impossible_legs": 0,
       "over_window": false,
-      "walk_km": 2.6,
+      "walk_km": 2.4,
       "avoid_hits": 0,
       "interests_covered": 3,
       "interests_total": 3,
       "llm_calls": 6,
-      "cost_usd": 0.0083,
-      "seconds": 29.3,
-      "mean_pop": 0.76,
-      "top_share": 0.25
+      "cost_usd": 0.0069,
+      "seconds": 27.5,
+      "mean_pop": 0.62,
+      "top_share": 0.12,
+      "prompt_tokens": 45836,
+      "completion_tokens": 4544,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 8,
+      "places_found": 8,
+      "vague": 0
     },
     "agent_stops": [
-      "Café Lapérouse",
       "Copains Rue Royale",
       "Ladurée",
-      "La Pâtisserie du Meurice par Cédric Grolet",
-      "Smith&Son",
       "Librairie du Jeu de Paume",
+      "Smith&Son",
+      "Jeu de Paume",
       "Musée de l'Orangerie",
-      "Petit Palais, Musée des beaux-arts de la Ville de Paris"
+      "Fondation Custodia",
+      "Librairie du musée"
     ],
+    "agent_detail": [
+      {
+        "name": "Copains Rue Royale",
+        "item": "place",
+        "found": true,
+        "lat": 48.8675021,
+        "lon": 2.3223862,
+        "arrive": "10:04",
+        "depart": "10:34"
+      },
+      {
+        "name": "Ladurée",
+        "item": "place",
+        "found": true,
+        "lat": 48.868472,
+        "lon": 2.3236905,
+        "arrive": "10:37",
+        "depart": "11:07"
+      },
+      {
+        "name": "Librairie du Jeu de Paume",
+        "item": "place",
+        "found": true,
+        "lat": 48.8659725,
+        "lon": 2.3237131,
+        "arrive": "11:13",
+        "depart": "11:33"
+      },
+      {
+        "name": "Smith&Son",
+        "item": "place",
+        "found": true,
+        "lat": 48.8661776,
+        "lon": 2.3250282,
+        "arrive": "12:30",
+        "depart": "13:00"
+      },
+      {
+        "name": "Jeu de Paume",
+        "item": "place",
+        "found": true,
+        "lat": 48.8658156,
+        "lon": 2.3240828,
+        "arrive": "13:04",
+        "depart": "14:04"
+      },
+      {
+        "name": "Musée de l'Orangerie",
+        "item": "place",
+        "found": true,
+        "lat": 48.8637655,
+        "lon": 2.3226594,
+        "arrive": "14:10",
+        "depart": "15:25"
+      },
+      {
+        "name": "Fondation Custodia",
+        "item": "place",
+        "found": true,
+        "lat": 48.8613608,
+        "lon": 2.3197732,
+        "arrive": "15:34",
+        "depart": "16:19"
+      },
+      {
+        "name": "Librairie du musée",
+        "item": "place",
+        "found": true,
+        "lat": 48.8602617,
+        "lon": 2.3256404,
+        "arrive": "16:26",
+        "depart": "16:46"
+      }
+    ],
+    "brief": {
+      "city": "Paris",
+      "country": "France",
+      "language": "en",
+      "date": "2026-10-25",
+      "date_to": null,
+      "start_time": "10:00:00",
+      "end_time": "17:00:00",
+      "start_point": "Place de la Concorde",
+      "interests": [
+        {
+          "label": "Impressionist painting",
+          "weight": 1.0,
+          "source": "request"
+        },
+        {
+          "label": "Old bookshops",
+          "weight": 0.7,
+          "source": "request"
+        },
+        {
+          "label": "Good bakery for lunch",
+          "weight": 0.7,
+          "source": "request"
+        }
+      ],
+      "avoid": [
+        "big crowds",
+        "churches"
+      ],
+      "pace": "normal",
+      "with_kids": false,
+      "max_walk_km": null,
+      "must_include": [],
+      "notes": null
+    },
+    "start": {
+      "lat": 48.8655715,
+      "lon": 2.3212248,
+      "label": "Concorde Square"
+    },
     "baseline": {
-      "stops": 8,
-      "found": 8,
+      "stops": 7,
+      "found": 7,
       "closed": 1,
-      "impossible_legs": 4,
+      "impossible_legs": 3,
       "over_window": false,
-      "walk_km": 24.8,
+      "walk_km": 10.3,
       "avoid_hits": 0,
       "interests_covered": null,
       "interests_total": null,
       "llm_calls": 1,
       "cost_usd": 0.0003,
-      "seconds": 9.9,
-      "mean_pop": 0.78,
-      "top_share": 0.62
+      "seconds": 5.9,
+      "mean_pop": 0.82,
+      "top_share": 0.71,
+      "prompt_tokens": 920,
+      "completion_tokens": 444,
+      "web_searches": null,
+      "cited_pages": null,
+      "transit_impossible": 0,
+      "places": 7,
+      "places_found": 7,
+      "vague": 0
     },
     "baseline_stops": [
       "Place de la Concorde",
       "Jardin des Tuileries",
-      "Musée de l'Orangerie (Water Lilies by Monet)",
+      "Musée de l'Orangerie",
+      "Boulangerie Du Pain et des Idées",
       "Shakespeare and Company",
-      "Boulangerie Du Pont Louis-Philippe",
-      "Librairie Gibert Joseph",
-      "Musée Marmottan Monet",
-      "Passage Jouffroy"
+      "Librairie Gilbert Jeune",
+      "Musée d'Orsay"
+    ],
+    "baseline_detail": [
+      {
+        "name": "Place de la Concorde",
+        "item": "place",
+        "found": true,
+        "lat": 48.8655715,
+        "lon": 2.3212248,
+        "arrive": "10:00",
+        "depart": "10:20"
+      },
+      {
+        "name": "Jardin des Tuileries",
+        "item": "place",
+        "found": true,
+        "lat": 48.8635662,
+        "lon": 2.3269552,
+        "arrive": "10:30",
+        "depart": "11:15"
+      },
+      {
+        "name": "Musée de l'Orangerie",
+        "item": "place",
+        "found": true,
+        "lat": 48.8637655,
+        "lon": 2.3226602,
+        "arrive": "11:20",
+        "depart": "12:20"
+      },
+      {
+        "name": "Boulangerie Du Pain et des Idées",
+        "item": "place",
+        "found": true,
+        "lat": 48.8712472,
+        "lon": 2.3629042,
+        "arrive": "12:45",
+        "depart": "13:30"
+      },
+      {
+        "name": "Shakespeare and Company",
+        "item": "place",
+        "found": true,
+        "lat": 48.8525747,
+        "lon": 2.3471123,
+        "arrive": "14:00",
+        "depart": "15:00"
+      },
+      {
+        "name": "Librairie Gilbert Jeune",
+        "item": "place",
+        "found": true,
+        "lat": 48.853187,
+        "lon": 2.3443087,
+        "arrive": "15:10",
+        "depart": "15:50"
+      },
+      {
+        "name": "Musée d'Orsay",
+        "item": "place",
+        "found": true,
+        "lat": 48.8599179,
+        "lon": 2.3265849,
+        "arrive": "16:05",
+        "depart": "17:00"
+      }
     ]
   }
 ]

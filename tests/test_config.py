@@ -54,3 +54,11 @@ def test_secrets_stay_out_of_the_settings_repr(monkeypatch):
 
     assert "secret-value" not in shown
     assert "model_name=" in shown
+
+
+def test_the_trip_planner_agent_is_on_unless_turned_off(monkeypatch):
+    monkeypatch.delenv("TRIP_PLANNER_AGENT", raising=False)
+    assert load_settings().trip_planner_agent
+
+    monkeypatch.setenv("TRIP_PLANNER_AGENT", "0")  # the eval's ablation: code assembly only
+    assert not load_settings().trip_planner_agent

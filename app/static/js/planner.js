@@ -6,14 +6,15 @@
  * walk is a one-day journey and looks exactly like one. The server streams the
  * agent's work as NDJSON: one AgentEvent {type, data} per line. Events about one day
  * carry data.day (0-based); those about the whole trip (the brief, the plan of the
- * days, memory) do not. Every event type has one handler below that turns it into
- * something visible: a stage strip, a live trace of tool calls and shortlisted places
- * tagged with their day, then the routes on the map and as timelines. The final
- * "journey" event carries the whole JourneyView. The page keeps no plan logic of its
- * own: the server owns the journey and saves every run, the page only keeps the
- * journey id (in the address too), so a feedback run on one day is just another
- * stream rendered by the same handlers, and /app/trips/{id} reopens a saved journey
- * exactly where its last run stopped.
+ * days, the trip planner agent that shares the found places between the days, memory)
+ * do not, and show whichever day is selected. Every event type has one handler below
+ * that turns it into something visible: a stage strip, a live trace of tool calls and
+ * shortlisted places tagged with their day, then the routes on the map and as
+ * timelines. The final "journey" event carries the whole JourneyView. The page keeps
+ * no plan logic of its own: the server owns the journey and saves every run, the page
+ * only keeps the journey id (in the address too), so a feedback run on one day is just
+ * another stream rendered by the same handlers, and /app/trips/{id} reopens a saved
+ * journey exactly where its last run stopped.
  *
  * One selection drives the page: a day, or «Все дни». It focuses that day's route on
  * the map and dims the others, shows its timeline, filters the trace to its work and
@@ -46,7 +47,9 @@ const MAX_DAYS = 7;
 
 // Stage names in pipeline order with short labels for the strip; the server sends a longer
 // human label with each stage, which goes into the trace and the status line. "days" is
-// the strip's own summary of every day's stages on a journey of several days.
+// the strip's own summary of every day's stages on a journey of several days;
+// "synthesize", the trip planner between the days' research and their routes, is a stage
+// of the whole trip and follows it in the strip.
 const STAGES = [
   ["feedback", "Пожелание"],
   ["brief", "Запрос"],
@@ -54,6 +57,7 @@ const STAGES = [
   ["outline", "План дней"],
   ["days", "Маршруты дней"],
   ["research", "Поиск"],
+  ["synthesize", "Сборка поездки"],
   ["optimize", "Расписание"],
   ["route", "Пути"],
   ["validate", "Проверка"],
@@ -67,8 +71,9 @@ const PLAN_STAGES = ["brief", "weather", "research", "optimize", "route", "valid
 // A plan of several days shows the trip's own stages; each day's progress is on its tab.
 const JOURNEY_STAGES = ["brief", "outline", "days"];
 
-// Keys are the agent's tool names (GET /api/tools). A Map, not an object: the name comes
-// from the model, and "constructor" must not find Object's.
+// Keys are the tool names of the day agents (GET /api/tools) and of the trip planner
+// (app/agent/planner.py). A Map, not an object: the name comes from the model, and
+// "constructor" must not find Object's.
 const TOOL_KINDS = new Map([
   ["get_wikivoyage_listings", ["WV", "src-wikivoyage", "Wikivoyage"]],
   ["search_wikipedia", ["W", "src-wikipedia", "Википедия"]],
@@ -77,6 +82,9 @@ const TOOL_KINDS = new Map([
   ["shortlist_place", ["★", "tool-shortlist", "В шорт-лист"]],
   ["remove_place", ["−", "tool-shortlist", "Из шорт-листа"]],
   ["finish_research", ["✓", "tool-finish", "Конец поиска"]],
+  ["assign_day", ["⇄", "tool-plan", "Места дня"]],
+  ["check_day", ["◎", "tool-plan", "Проверка дня кодом"]],
+  ["finish_plan", ["✓", "tool-finish", "План поездки готов"]],
 ]);
 
 // Place.kind values the sources produce: OSM categories, "landmark" for Wikipedia
@@ -401,7 +409,7 @@ function beginRun(kind, title, day) {
     showEmpty(
       "Агент работает",
       several()
-        ? "Следите за ним слева: он делит город по дням, ищет места для каждого дня, а расписание и проверка собирают маршруты."
+        ? "Следите за ним слева: он делит город по дням, агенты дней ищут места, агент-планировщик распределяет их по дням, а расписание и проверка собирают маршруты."
         : "Следите за ним слева: он ищет места, отбирает подходящие, а затем расписание и проверка соберут маршрут.",
     );
   }
@@ -544,6 +552,8 @@ function dayProgress(index) {
   const active = [...stages].filter(([, status]) => status === "active").map(([name]) => name).at(-1);
   if (active) return { status: "active", text: `${stageLabel(active).toLowerCase()}…` };
   if (stages.get("write") === "done") return { status: "done", text: "маршрут готов" };
+  // between its research and its route a day waits for the trip planner
+  if (current.stages.get("synthesize") === "active") return { status: "active", text: "ждёт планировщика…" };
   return { status: "active", text: "в работе…" };
 }
 
@@ -589,6 +599,17 @@ function showStageDetail(name, detail, day) {
   if (name === "outline") onOutline(detail);
   // the city and the start point are found: the map flies there
   if (detail.start && day === null) state.map?.showStart(detail.start);
+  if (name === "synthesize") {
+    const places = Array.isArray(detail.places) ? detail.places.reduce((all, n) => all + n, 0) : null;
+    addRow(
+      "note",
+      badge("⇄", "tool-plan"),
+      null,
+      `Планировщик: ${count(detail.steps ?? 0, "шаг", "шага", "шагов")}`,
+      places !== null ? `, ${count(places, "место", "места", "мест")} по дням` : "",
+      detail.stop_reason ? h("code", { class: "stop-reason" }, detail.stop_reason) : null,
+    );
+  }
   if (name === "research") {
     const candidates = detail.candidates ?? 0;
     addRow(

@@ -1,10 +1,13 @@
 """Trips of several days offline: the day plan (outline), the days researched in
-parallel over one registry, optimized one by one without repeats, and feedback on
-one day that leaves the others' places alone."""
+parallel over one registry, the trip planner agent that allocates their places to the
+days (or code, when it is off or fails), the days optimized one by one without repeats,
+and feedback on one day that leaves the others' places alone."""
 
 import asyncio
 import json
 import re
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -51,19 +54,29 @@ SEARCH = {"categories": ["museum", "cafe"], "radius_m": 1000}
 
 class TripLLM:
     """A scripted LLM for days that run in parallel: the agent's turns are scripted per
-    day (read from the date in the research task), an exception among them is raised,
-    structured replies per schema, and the writer gets texts for exactly the stops it
-    was sent."""
+    day (read from the date in the research task) and the trip planner's on their own,
+    an exception among them is raised, structured replies per schema, and the writer
+    gets texts for exactly the stops it was sent."""
 
     def __init__(
-        self, turns: dict[date, list[ChatTurn | Exception]], structured: dict[str, list[Any]]
+        self,
+        turns: dict[date, list[ChatTurn | Exception]],
+        structured: dict[str, list[Any]],
+        planner: list[ChatTurn | Exception] = (),
     ):
         self.turns = turns
         self.structured_replies = structured
+        self.planner = list(planner)
         self.days: list[date] = []  # the day of every agent turn, in call order
         self.seen: list[tuple[str, list[dict[str, Any]]]] = []
 
     async def chat(self, messages, tools=None, **_):
+        if any(tool["function"]["name"] == "finish_plan" for tool in tools or []):
+            self.seen.append(("planner", json.loads(json.dumps(messages))))
+            reply = self.planner.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
         day = date.fromisoformat(re.search(r"Date: (\d{4}-\d{2}-\d{2})", messages[1]["content"])[1])
         self.days.append(day)
         self.seen.append(("chat", json.loads(json.dumps(messages))))
@@ -83,6 +96,19 @@ class TripLLM:
 
     def calls(self, kind: str) -> list[list[dict[str, Any]]]:
         return [messages for name, messages in self.seen if name == kind]
+
+
+@pytest.fixture(autouse=True)
+def trip_planner(monkeypatch: pytest.MonkeyPatch) -> Callable[[bool], None]:
+    """Code assembles the days unless a test turns the trip planner agent on: most tests
+    here pin how code splits the places between the days, which is also what runs
+    whenever the planner fails."""
+
+    def use(on: bool) -> None:
+        monkeypatch.setattr(pipeline, "settings", replace(pipeline.settings, trip_planner_agent=on))
+
+    use(False)
+    return use
 
 
 @pytest.fixture
@@ -410,7 +436,8 @@ async def test_a_trip_whose_every_day_fails_reports_the_providers_error(sources)
         )
 
 
-async def test_a_single_walk_makes_no_outline_call(sources):
+async def test_a_single_walk_makes_no_outline_call_nor_a_planner_call(sources, trip_planner):
+    trip_planner(True)
     llm = TripLLM(
         turns={DAY: _day_turns([1, 2, 3, 4], "история")},
         structured={"BriefDraft": [{**BRIEF_REPLY, "days": None, "interests": INTERESTS[::2]}]},
@@ -419,6 +446,7 @@ async def test_a_single_walk_makes_no_outline_call(sources):
 
     journey = await pipeline.plan_journey(req, llm, Recorder(), DAY)
 
+    # With the trip planner on: a single walk has no days to share places between.
     assert [name for name, _ in llm.seen if name != "chat"] == ["BriefDraft", "PlanTexts"]
     assert len(journey.days) == len(journey.outline) == 1
     # Nothing is shifted between days: the brief's own weights, no day goal.
@@ -634,3 +662,317 @@ async def test_a_named_place_found_by_an_earlier_day_stays_with_its_own_day(sour
     first, second = ([s.place.id for s in day.plan.stops] for day in journey.days)
     assert "osm:node/3" not in first and "osm:node/3" in second
     assert not [v for v in journey.days[1].plan.violations if v.code == "missing_must_include"]
+
+
+# --- the trip planner ----------------------------------------------------------------
+
+TWO_DAYS_OUTLINE = {
+    "title": "Казань за два дня",
+    "days": [
+        {"theme": "Кремль и музеи", "focus": ["история"], "area": None},
+        {"theme": "Кофейни под дождём", "focus": ["кофе"], "area": None},
+    ],
+}
+
+
+def _ids(*numbers: int) -> list[str]:
+    return [f"osm:node/{n}" for n in numbers]
+
+
+# Places 3 and 4 were found by both days, which code would leave on the first; the planner
+# gives them to the second and the first day place 5, which only the second day found.
+PLANNED = [
+    turn(
+        call("assign_day", day=1, place_ids=_ids(1, 2, 5)),
+        call("assign_day", day=2, place_ids=_ids(3, 4, 6)),
+        call("check_day", day=1),
+        call("check_day", day=2),
+        content="Делю места между днями.",
+    ),
+    turn(call("finish_plan", summary="Храмы и музеи в первый день, кофейни во второй.")),
+]
+
+
+def _two_days_llm(planner: list[ChatTurn | Exception]) -> TripLLM:
+    return TripLLM(
+        turns={DAY: _day_turns([1, 2, 3, 4], "история"), RAINY: _day_turns([3, 4, 5, 6], "кофе")},
+        structured={"BriefDraft": [{**BRIEF_REPLY, "days": 2}], "OutlineDraft": [TWO_DAYS_OUTLINE]},
+        planner=planner,
+    )
+
+
+async def _plan_two_days(llm: TripLLM, events: Recorder) -> pipeline.Journey:
+    req = pipeline.PlanRequest(request="Казань, два дня с 24 октября, с 10 до 13")
+    return await pipeline.plan_journey(req, llm, events, DAY)
+
+
+def _stops(journey: pipeline.Journey) -> list[list[str]]:
+    return [[s.place.id for s in day.plan.stops] for day in journey.days]
+
+
+async def test_the_trip_planner_allocates_the_places_and_code_builds_its_days(
+    sources, trip_planner
+):
+    trip_planner(True)
+    llm = _two_days_llm(PLANNED)
+    events = Recorder()
+
+    journey = await _plan_two_days(llm, events)
+
+    # Each day is built from the places the planner gave it, and from nothing else.
+    stops = _stops(journey)
+    assert [set(day) for day in stops] == [set(_ids(1, 2, 5)), set(_ids(3, 4, 6))]
+    assert all(not [v for v in d.plan.violations if v.severity == "error"] for d in journey.days)
+    # Place 5 moved to the first day's shortlist at its full score: the planner, not a
+    # discount, decided it belongs there.
+    assert journey.days[0].state.shortlist["osm:node/5"].score == 0.8
+
+    # The planner saw the pooled findings and the forecast, and the real code's verdict.
+    first, second = llm.calls("planner")
+    task = first[1]["content"]
+    assert '"found_by":[1,2]' in task and '"rainy_hours":["11:00"]' in task
+    checks = [json.loads(m["content"]) for m in second if m["role"] == "tool"][2:]
+    assert [c["verdict"] for c in checks] == ["no errors", "no errors"]
+    assert {s["id"] for s in checks[1]["stops"]} == set(_ids(3, 4, 6))
+
+    # The planner works on the whole trip: its stage and its events carry no day; it runs
+    # after every day's research and before any day is built.
+    mine = [e for e in events if e.data.get("agent") == "planner"]
+    assert {e.type for e in mine} == {"thought", "tool_call", "tool_result"}
+    assert all("day" not in e.data for e in mine)
+    synthesize = [e.data for e in events if e.data.get("name") == "synthesize"]
+    assert [(s["status"], s.get("day")) for s in synthesize] == [("start", None), ("done", None)]
+    assert synthesize[1]["label"].endswith("Храмы и музеи в первый день, кофейни во второй.")
+    assert synthesize[1]["detail"]["places"] == [3, 3]
+    started = [e.data["name"] for e in events if e.type == "stage" and e.data["status"] == "start"]
+    research = max(i for i, name in enumerate(started) if name == "research")
+    assert research < started.index("synthesize") < started.index("optimize")
+    assert not [e for e in events if e.type == "warning"]
+
+
+async def test_trip_feedback_can_move_a_stop_previously_assigned_by_the_planner(
+    sources, trip_planner
+):
+    trip_planner(True)
+    llm = _two_days_llm(PLANNED)
+    journey = await _plan_two_days(llm, Recorder())
+    before = _stops(journey)
+    research_calls, planner_calls = len(llm.calls("chat")), len(llm.calls("planner"))
+    # The planner borrowed place 5 from the second day's research. Feedback must be
+    # able to move it back using the stored shortlist, without rerunning the planner.
+    llm.structured_replies["JourneyEdit"] = [
+        {
+            "reply": "Меняю кофейни местами.",
+            "moves": [
+                {"source_day": 0, "target_day": 1, "place_id": "osm:node/5"},
+                {"source_day": 1, "target_day": 0, "place_id": "osm:node/4"},
+            ],
+        }
+    ]
+    events = Recorder()
+
+    updated, _, changed = await pipeline.apply_journey_feedback(
+        journey,
+        pipeline.JourneyFeedbackRequest(feedback="Поменяй Место 5 и Место 4 местами"),
+        llm,
+        events,
+    )
+
+    assert changed == [0, 1]
+    assert [set(day) for day in _stops(updated)] == [set(_ids(1, 2, 4)), set(_ids(3, 5, 6))]
+    assert _stops(journey) == before
+    assert all(not [v for v in d.plan.violations if v.severity == "error"] for d in updated.days)
+    assert len(llm.calls("chat")) == research_calls
+    assert len(llm.calls("planner")) == planner_calls
+    assert not [e for e in events if e.data.get("name") == "synthesize"]
+
+
+@pytest.mark.parametrize(
+    "planner",
+    [
+        [LLMError("rate limited", 429)],
+        [RuntimeError("bug")],
+        [turn(call("assign_day", day=1, place_ids=_ids(1, 2, 5)))],
+    ],
+    ids=["provider error", "unexpected exception", "out of steps"],
+)
+async def test_when_the_trip_planner_does_not_finish_code_assembles_the_days(
+    sources, trip_planner, monkeypatch, planner
+):
+    by_code = _stops(await _plan_two_days(_two_days_llm([]), Recorder()))
+    trip_planner(True)
+    monkeypatch.setattr(pipeline, "PLANNER_STEPS", 1)
+    events = Recorder()
+
+    journey = await _plan_two_days(_two_days_llm(planner), events)
+
+    assert _stops(journey) == by_code
+    assert [e.data for e in events if e.type == "warning"] == [
+        {"message": pipeline.PLANNER_FALLBACK}
+    ]
+    done = [e.data for e in events if e.data.get("name") == "synthesize"][-1]
+    assert done["status"] == "done" and done["label"].startswith("Планировщик остановился")
+
+
+async def test_with_the_trip_planner_off_code_assembles_the_days(sources):
+    llm = _two_days_llm([])
+    events = Recorder()
+
+    journey = await _plan_two_days(llm, events)
+
+    assert not llm.calls("planner")
+    assert not [e for e in events if e.data.get("name") == "synthesize"]
+    # The first day comes first: it keeps place 3, which both days found, and takes the
+    # second day's place 5 at a discount.
+    assert {"osm:node/3", "osm:node/5"} <= set(_stops(journey)[0])
+    assert journey.days[0].state.shortlist["osm:node/5"].score == 0.48
+
+
+async def test_a_planners_plan_that_does_not_build_is_undone_and_code_assembles_the_days(
+    sources, trip_planner, monkeypatch
+):
+    trip_planner(True)
+    build_checked = pipeline._build_checked
+
+    async def second_day_fails(day, llm, emit, facts, borrowed=None, allowed=None):
+        if allowed is not None and day.state.brief.date == RAINY:
+            raise pipeline.PipelineError("Не удалось собрать маршрут")
+        return await build_checked(day, llm, emit, facts, borrowed, allowed)
+
+    monkeypatch.setattr(pipeline, "_build_checked", second_day_fails)
+    events = Recorder()
+
+    journey = await _plan_two_days(_two_days_llm(PLANNED), events)
+
+    # The first day was built from the plan and place 5 moved to its shortlist at full
+    # score; undone, code assembles it again and takes place 5 at a discount.
+    assert {"osm:node/3", "osm:node/5"} <= set(_stops(journey)[0])
+    assert journey.days[0].state.shortlist["osm:node/5"].score == 0.48
+    assert [e.data for e in events if e.type == "warning"] == [
+        {"message": pipeline.PLANNER_FALLBACK}
+    ]
+
+
+async def test_a_place_the_traveller_named_stays_on_its_day_when_the_planner_leaves_it_out(
+    sources, trip_planner
+):
+    trip_planner(True)
+    llm = TripLLM(
+        turns={DAY: _day_turns([1, 2, 3, 4], "история"), RAINY: _day_turns([3, 5, 6, 7], "кофе")},
+        structured={
+            "BriefDraft": [{**BRIEF_REPLY, "days": 2, "must_include": ["Место 3"]}],
+            "OutlineDraft": [
+                {
+                    "title": "Два дня",
+                    "days": [
+                        {"theme": "История", "focus": ["история"], "must_include": []},
+                        {"theme": "Кофе", "focus": ["кофе"], "must_include": ["Место 3"]},
+                    ],
+                }
+            ],
+        },
+        planner=[
+            turn(
+                call("assign_day", day=1, place_ids=_ids(1, 2, 4)),
+                call("assign_day", day=2, place_ids=_ids(5, 6, 7)),  # without «Место 3»
+                call("check_day", day=1),
+                call("check_day", day=2),
+            ),
+            turn(call("finish_plan", summary="Два дня.")),
+        ],
+    )
+    events = Recorder()
+    req = pipeline.PlanRequest(request="Казань, два дня, обязательно Место 3")
+
+    journey = await pipeline.plan_journey(req, llm, events, DAY)
+
+    # The planner's plan was built (no fallback), with the named place on its day.
+    assert not [e for e in events if e.type == "warning"]
+    first, second = _stops(journey)
+    assert set(first) <= set(_ids(1, 2, 4)) and "osm:node/3" in second
+    assert not [v for v in journey.days[1].plan.violations if v.code == "missing_must_include"]
+
+
+async def test_with_fewer_places_than_days_the_planner_is_not_started(sources, trip_planner):
+    trip_planner(True)
+    llm = _two_days_llm([])
+    # Both days found only place 1: no allocation can give each day a place. The repair
+    # rounds of the days code builds find nothing more.
+    give_up = [turn(call("finish_research", summary="больше ничего"))] * 6
+    llm.turns = {DAY: [*_day_turns([1], "история"), *give_up], RAINY: _day_turns([1], "кофе")}
+    llm.turns[RAINY] += give_up
+    events = Recorder()
+
+    with pytest.raises(pipeline.PipelineError, match="День 2"):
+        await _plan_two_days(llm, events)
+
+    assert not llm.calls("planner")
+    assert not [e for e in events if e.type == "warning"]
+
+
+async def test_a_place_the_planner_moves_replaces_the_days_own_record_of_it(sources):
+    museum = Place(
+        id="osm:node/90",
+        name="Музей Казани",
+        lat=CENTER.lat + 0.002,
+        lon=CENTER.lon,
+        kind="museum",
+        source="osm",
+        opening_hours="Mo-Su 09:00-20:00",
+        indoor=True,
+        tags={"wikidata": "Q90"},
+    )
+    # Its Wikipedia article, on the second day's shortlist: no hours, no indoor flag.
+    article = museum.model_copy(
+        update={"id": "wikipedia:ru:90", "source": "wikipedia", "kind": "landmark"}
+        | {"opening_hours": None, "indoor": None}
+    )
+
+    def cand(p: Place) -> Candidate:
+        return Candidate(place=p, score=0.8, reason="ок", visit_minutes=30)
+
+    other = [P[pid] for pid in _ids(2, 3, 4, 5)]
+    registry = {p.id: p for p in [museum, article, *other]}
+    days = [
+        pipeline.DayRun(
+            id=str(i),
+            state=ResearchState(
+                brief=_brief(date=DAY, date_to=None, must_include=[]),
+                start=CENTER,
+                weather_summary="",
+                registry=registry,
+                shortlist={p.id: cand(p) for p in places},
+            ),
+            weather=[],
+        )
+        for i, places in enumerate([[museum, *other[:2]], [article, *other[2:]]])
+    ]
+    # The planner gave the museum's fullest record, the first day's, to the second day.
+    selections = [{p.id: cand(p) for p in other[:2]}, {p.id: cand(p) for p in [museum, *other[2:]]}]
+
+    plans = await pipeline._assemble(days, None, Recorder(), [], selections)
+
+    # Built from the OSM record and kept by the day in its place of the article: a later
+    # rebuild of the day (feedback) still knows the museum's hours.
+    assert {s.place.id for s in plans[1].stops} == {museum.id, *_ids(4, 5)}
+    assert set(days[1].state.shortlist) == {museum.id, *_ids(4, 5)}
+
+
+async def test_a_bug_in_pooling_the_finds_costs_the_trip_nothing(
+    sources, trip_planner, monkeypatch
+):
+    by_code = _stops(await _plan_two_days(_two_days_llm([]), Recorder()))
+    trip_planner(True)
+
+    def broken(*args: Any) -> None:
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(pipeline, "pool_trip", broken)
+    events = Recorder()
+
+    journey = await _plan_two_days(_two_days_llm([]), events)
+
+    assert _stops(journey) == by_code
+    assert [e.data for e in events if e.type == "warning"] == [
+        {"message": pipeline.PLANNER_FALLBACK}
+    ]
