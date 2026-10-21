@@ -136,6 +136,50 @@ async def test_journeys_are_scoped_to_their_owner(store, make_journey):
     assert await store.list_journeys(anna.id) == []
 
 
+async def test_coordinated_feedback_updates_only_named_days(store, make_journey):
+    user = await _user(store)
+    await _create(store, user, make_journey(days=3))
+    edited = await store.load_journey(user.id, "j1")
+    for day in edited.days:
+        day.plan.title = "Обновлён"
+    entry = HistoryEntry(kind="feedback", days=[0, 1], text="Обнови два дня", cost_usd=0.02)
+    await store.update_journey(user.id, edited, entry)
+    detail = await store.get_journey(user.id, "j1")
+    assert [day.plan.title for day in detail.journey.days] == [
+        "Обновлён",
+        "Обновлён",
+        "Конструктивизм и кофе",
+    ]
+    assert detail.history[-1].days == [0, 1] and detail.history[-1].day is None
+    assert detail.history[0].days == []
+
+
+async def test_failure_saving_second_day_rolls_back_first_day_and_history(
+    store, make_journey, monkeypatch
+):
+    user = await _user(store)
+    await _create(store, user, make_journey(days=3))
+    before = await store.get_journey(user.id, "j1")
+    edited = await store.load_journey(user.id, "j1")
+    edited.days[0].plan.title = "Не должно сохраниться"
+    record = store_module._record_day
+    calls = []
+
+    def fail_second(row, day):
+        calls.append(day.id)
+        if len(calls) == 2:
+            raise RuntimeError("database write failed")
+        record(row, day)
+
+    monkeypatch.setattr(store_module, "_record_day", fail_second)
+    with pytest.raises(RuntimeError, match="database write failed"):
+        await store.update_journey(
+            user.id, edited, HistoryEntry(kind="feedback", days=[0, 1], text="Обмен", cost_usd=0.02)
+        )
+    assert len(calls) == 2
+    assert await store.get_journey(user.id, "j1") == before
+
+
 async def test_deleting_a_journey_deletes_its_days_and_keeps_what_was_learned(
     store, make_journey, tmp_path
 ):

@@ -93,7 +93,12 @@ def test_planner_scripts_call_and_link_only_routes_the_server_has():
     }
     # the journey's endpoints: a template such as "/api/journeys/${id}" fills each segment
     concrete = {re.sub(r"\$\{[^}]*\}", "x", path) for path in paths}
-    assert {"/api/plan", "/api/transcribe", "/api/journeys/x/days/x/feedback"} <= concrete
+    assert {
+        "/api/plan",
+        "/api/transcribe",
+        "/api/journeys/x/days/x/feedback",
+        "/api/journeys/x/feedback",
+    } <= concrete
     assert not sorted(p for p in concrete if not any(r.fullmatch(p) for r in ROUTES))
 
 

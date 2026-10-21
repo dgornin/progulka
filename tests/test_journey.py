@@ -750,6 +750,43 @@ async def test_the_trip_planner_allocates_the_places_and_code_builds_its_days(
     assert not [e for e in events if e.type == "warning"]
 
 
+async def test_trip_feedback_can_move_a_stop_previously_assigned_by_the_planner(
+    sources, trip_planner
+):
+    trip_planner(True)
+    llm = _two_days_llm(PLANNED)
+    journey = await _plan_two_days(llm, Recorder())
+    before = _stops(journey)
+    research_calls, planner_calls = len(llm.calls("chat")), len(llm.calls("planner"))
+    # The planner borrowed place 5 from the second day's research. Feedback must be
+    # able to move it back using the stored shortlist, without rerunning the planner.
+    llm.structured_replies["JourneyEdit"] = [
+        {
+            "reply": "Меняю кофейни местами.",
+            "moves": [
+                {"source_day": 0, "target_day": 1, "place_id": "osm:node/5"},
+                {"source_day": 1, "target_day": 0, "place_id": "osm:node/4"},
+            ],
+        }
+    ]
+    events = Recorder()
+
+    updated, _, changed = await pipeline.apply_journey_feedback(
+        journey,
+        pipeline.JourneyFeedbackRequest(feedback="Поменяй Место 5 и Место 4 местами"),
+        llm,
+        events,
+    )
+
+    assert changed == [0, 1]
+    assert [set(day) for day in _stops(updated)] == [set(_ids(1, 2, 4)), set(_ids(3, 5, 6))]
+    assert _stops(journey) == before
+    assert all(not [v for v in d.plan.violations if v.severity == "error"] for d in updated.days)
+    assert len(llm.calls("chat")) == research_calls
+    assert len(llm.calls("planner")) == planner_calls
+    assert not [e for e in events if e.data.get("name") == "synthesize"]
+
+
 @pytest.mark.parametrize(
     "planner",
     [

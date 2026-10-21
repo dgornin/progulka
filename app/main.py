@@ -1,6 +1,6 @@
 """HTTP layer: pages, accounts, saved journeys, voice input, and the agent's work as NDJSON.
 
-Each agent run (a new journey, or feedback on one day of a saved one) runs the
+Each agent run (a new journey, or feedback on one or several saved days) runs the
 pipeline in a background task that pushes AgentEvents into a queue; the response
 streams them one JSON object per line, so the UI shows every tool call while the agent
 is still working. The run is saved before the final `journey` event, so the journey
@@ -64,9 +64,11 @@ from app.pipeline import (
     EMPTY_REQUEST,
     FeedbackRequest,
     Journey,
+    JourneyFeedbackRequest,
     PipelineError,
     PlanRequest,
     apply_day_feedback,
+    apply_journey_feedback,
     has_place,
     plan_journey,
 )
@@ -525,6 +527,28 @@ async def feedback(
     user: UserDep,
     store: StoreDep,
 ) -> StreamingResponse:
+    return await _feedback_response(journey_id, index, req, request, user, store)
+
+
+@app.post("/api/journeys/{journey_id}/feedback")
+async def journey_feedback(
+    journey_id: str,
+    req: JourneyFeedbackRequest,
+    request: Request,
+    user: UserDep,
+    store: StoreDep,
+) -> StreamingResponse:
+    return await _feedback_response(journey_id, None, req, request, user, store)
+
+
+async def _feedback_response(
+    journey_id: str,
+    index: int | None,
+    req: FeedbackRequest | JourneyFeedbackRequest,
+    request: Request,
+    user: UserOut,
+    store: Store,
+) -> StreamingResponse:
     # Taken before the first await: a second request must not load the state this run
     # is about to replace and then overwrite its result. The run frees the journey when
     # it ends; until the run starts, this handler frees it on any failure.
@@ -537,28 +561,43 @@ async def feedback(
         journey = await store.load_journey(user.id, journey_id)
         if journey is None:
             raise HTTPException(status_code=404, detail=JOURNEY_NOT_FOUND)
-        if not 0 <= index < len(journey.days):
+        if index is not None and not 0 <= index < len(journey.days):
             raise HTTPException(status_code=404, detail=DAY_NOT_FOUND)
-        day = journey.days[index]
+        day = journey.days[index if index is not None else 0]
         stops = day.plan.stops if day.plan else []
         # «Убрать» from a stale tab, for a stop an earlier run already removed: nothing
         # to do, and refused before it uses up a run.
-        if not req.feedback.strip() and not any(
-            stop.place.id in req.exclude_place_ids for stop in stops
+        if (
+            isinstance(req, FeedbackRequest)
+            and not req.feedback.strip()
+            and not any(stop.place.id in req.exclude_place_ids for stop in stops)
         ):
             raise HTTPException(status_code=409, detail="Этого места уже нет в маршруте")
         profile, facts = await _traveller(store, user)
-        text = _feedback_text(req, stops)
+        text = _feedback_text(req, stops) if isinstance(req, FeedbackRequest) else req.feedback
 
         async def job(llm: LLM, emit: Emit) -> Outcome:
-            updated, reply = await apply_day_feedback(
-                journey, index, req, llm, emit, profile=profile, memory=facts
-            )
+            changed = []
+            if index is None:
+                updated, reply, changed = await apply_journey_feedback(
+                    journey, req, llm, emit, profile=profile, memory=facts
+                )
+            else:
+                updated, reply = await apply_day_feedback(
+                    journey, index, req, llm, emit, profile=profile, memory=facts
+                )
             entry = HistoryEntry(
-                kind="feedback", day=index, text=text, reply=reply, cost_usd=llm.usage.cost_usd
+                kind="feedback",
+                day=index,
+                days=changed,
+                text=text,
+                reply=reply,
+                cost_usd=llm.usage.cost_usd,
             )
             await store.update_journey(user.id, updated, entry)
-            learned = await _remember(store, user, updated.learned, updated.days[index].id)
+            learned = await _remember(
+                store, user, updated.learned, updated.days[index if index is not None else 0].id
+            )
             return Outcome(updated, reply, learned)
 
         return _stream(job, request, user, journey_id=journey_id)
